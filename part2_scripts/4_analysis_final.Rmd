@@ -1,0 +1,1433 @@
+---
+title: "diploid_analysis"
+author: "m quigg"
+date: "2025-08-23"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Population Structure
+```{r, include=FALSE}
+#libraries
+library(adegenet)
+library(vcfR)
+library(tidyverse)
+library(pinfsc50)
+library(dplyr)
+library(poppr)
+library(pegas)
+library(PopGenReport)
+library(hierfstat)
+library(paletteer)
+library(patchwork)
+library(mapmixture)
+library(gridExtra)
+library(geodist)
+library(vegan)
+library(tinytex)
+library(algatr)
+library(maps)
+library(tess3r)
+library(rworldmap)
+library(wingen)
+library(terra)
+library(raster)
+library(viridis)
+library(sf)
+
+#set working directory
+setwd("C:/Users/mquig/Desktop/DED/Data_analysis/diploid_final")
+
+#create custom color palette
+custom_colors_diploid=c("#C969A1FF", "#EB7926FF", "#859B6CFF","#004F63FF", "#592688")
+```
+
+##PCA
+
+The goal of doing a PCA is to see if there are any strong clusters. Each cluster can then be assigned as a population. Since we don't know the population structure of American elm, we need to try to identify it before moving forward with diversity analysis.
+
+During VCF filtering, I ended up with 4 different levels of "strictness" for the resulting number of SNPs. 
+
+1) strict: this has some pretty strict filtering
+2) lazy: less strict
+3) lazy_np: less strict and without linkage pruning
+4) ideal: this is based off of the VCF stats
+
+### PCA with Strict filtering
+
+```{r}
+###import the data###
+strict_pca=read_table("2n_strict.eigenvec", col_names = FALSE)
+strict_eigenval=scan("2n_strict.eigenval")
+
+###clean up the data###
+##remove extra ind column
+strict_pca=strict_pca[,-1]
+
+##rename the columnns##
+names(strict_pca)[1]="ind"
+names(strict_pca)[2:ncol(strict_pca)]=paste0("PC", 1:(ncol(strict_pca)-1))
+
+###calculate percetage variance explained (PVE)###
+##calculate it##
+strict_pve=data.frame(PC=1:20, pve=strict_eigenval/sum(strict_eigenval)*100)
+
+##graph it##
+ggplot(strict_pve, aes(PC, pve)) +geom_bar(stat = "identity") +
+  ylab("Percentage variance explained") +
+  theme_classic()
+#wow ok thats fairly low
+#the highest PVE is ~8, in the past it has been closer to 15
+
+##calculate the cumulative sum of the pve##
+cumsum(strict_pve$pve)
+#so PV 1,2,3 only account for 23% of the data
+
+
+###graph the PCA###
+strict_pca_plot=ggplot(strict_pca, aes(PC1, PC2))+
+  geom_point(size = 2) + 
+  #coord_equal() + 
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(strict_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(strict_pve$pve[2], 3), "%)")) +
+  labs(title = "111 SNPs with 'strict' VCF filtering")
+strict_pca_plot
+```
+
+### PCA with Lazy filtering
+```{r}
+lazy_pca=read_table("2n_lazy.eigenvec", col_names = FALSE)
+lazy_eigenval=scan("2n_lazy.eigenval")
+
+###clean up the data###
+##remove extra ind column
+lazy_pca=lazy_pca[,-1]
+
+##rename the columnns##
+names(lazy_pca)[1]="ind"
+names(lazy_pca)[2:ncol(lazy_pca)]=paste0("PC", 1:(ncol(lazy_pca)-1))
+
+###calculate percetage variance explained (PVE)###
+##calculate it##
+lazy_pve=data.frame(PC=1:20, pve=lazy_eigenval/sum(lazy_eigenval)*100)
+
+##graph it##
+ggplot(lazy_pve, aes(PC, pve)) +geom_bar(stat = "identity") +
+  ylab("Percentage variance explained") +
+  theme_classic()
+#wow ok thats fairly low
+#the highest PVE is ~7, for the strict one it was closer to 8
+
+##calculate the cumulative sum of the pve##
+cumsum(lazy_pve$pve)
+#so PV 1,2,3 only account for 20% of the data
+#this is lower than the strict
+
+
+###graph the PVA###
+lazy_pca_plot=ggplot(lazy_pca, aes(PC1, PC2))+
+  geom_point(size = 2) + 
+  #coord_equal() + 
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(lazy_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(lazy_pve$pve[2], 3), "%)")) +
+  labs(title = "264 SNPs with 'lazy' VCF filtering")
+lazy_pca_plot
+```
+
+### PCA with Lazy filtering and no Linkage Pruning
+```{r}
+###import the data###
+lazy_np_pca=read_table("2n_lazy_noprune.eigenvec", col_names = FALSE)
+lazy_np_eigenval=scan("2n_lazy_noprune.eigenval")
+
+###clean up the data###
+##remove extra ind column
+lazy_np_pca=lazy_np_pca[,-1]
+
+##rename the columnns##
+names(lazy_np_pca)[1]="ind"
+names(lazy_np_pca)[2:ncol(lazy_np_pca)]=paste0("PC", 1:(ncol(lazy_np_pca)-1))
+
+###calculate percetage variance explained (PVE)###
+##calculate it##
+lazy_np_pve=data.frame(PC=1:20, pve=lazy_np_eigenval/sum(lazy_np_eigenval)*100)
+
+##graph it##
+ggplot(lazy_np_pve, aes(PC, pve)) +geom_bar(stat = "identity") +
+  ylab("Percentage variance explained") +
+  theme_classic()
+#wow ok thats fairly low
+
+##calculate the cumulative sum of the pve##
+cumsum(lazy_np_pve$pve)
+#so PV 1,2,3 only account for 23% of the data
+#this is lower than the strict
+
+
+###graph the PCA###
+lazy_np_pca_plot=ggplot(lazy_np_pca, aes(PC1, PC2))+
+  geom_point(size = 2) + 
+  #coord_equal() + 
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(lazy_np_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(lazy_np_pve$pve[2], 3), "%)")) +
+  labs(title = "998 SNPs with 'lazy' VCF filtering", subtitle = "No linkage pruning")
+lazy_np_pca_plot
+```
+
+### PCA with Ideal filtering
+```{r}
+###import the data###
+ideal_pca=read_table("2n_ideal.eigenvec", col_names = FALSE)
+ideal_eigenval=scan("2n_ideal.eigenval")
+
+###clean up the data###
+##remove extra ind column
+ideal_pca=ideal_pca[,-1]
+
+##rename the columns##
+names(ideal_pca)[1]="ind"
+names(ideal_pca)[2:ncol(ideal_pca)]=paste0("PC", 1:(ncol(ideal_pca)-1))
+
+###calculate percetage variance explained (PVE)###
+##calculate it##
+ideal_pve=data.frame(PC=1:20, pve=ideal_eigenval/sum(ideal_eigenval)*100)
+
+##graph it##
+ggplot(ideal_pve, aes(PC, pve)) +geom_bar(stat = "identity") +
+  ylab("Percentage variance explained") +
+  theme_classic()
+#wow ok thats fairly low
+#the highest PVE is over, for the strict one it was closer to 8, and the lazy one was lower
+
+##calculate the cumulative sum of the pve##
+cumsum(ideal_pve$pve)
+#so PV 1,2,3 only account for 22% of the data
+#this is more than the lazy
+
+
+###graph the PVA###
+ideal_pca_plot=ggplot(ideal_pca, aes(PC1, PC2))+
+  geom_point(size = 2) + 
+  #coord_equal() + 
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(ideal_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(ideal_pve$pve[2], 3), "%)")) +
+  labs(title = "Diploid PCA")
+ideal_pca_plot
+```
+### PCA with ideal filtering and only biallelic sites
+```{r}
+###import the data###
+ideal_bi_pca=read_table("final2n_ideal_LDpruned_PCA.eigenvec", col_names = FALSE)
+ideal_bi_eigenval=scan("final2n_ideal_LDpruned_PCA.eigenval")
+
+###clean up the data###
+##remove extra ind column
+ideal_bi_pca=ideal_bi_pca[,-1]
+
+##rename the columns##
+names(ideal_bi_pca)[1]="ind"
+names(ideal_bi_pca)[2:ncol(ideal_bi_pca)]=paste0("PC", 1:(ncol(ideal_bi_pca)-1))
+
+###calculate percetage variance explained (PVE)###
+##calculate it##
+ideal_pve=data.frame(PC=1:20, pve=ideal_eigenval/sum(ideal_eigenval)*100)
+
+##graph it##
+ggplot(ideal_pve, aes(PC, pve)) +geom_bar(stat = "identity") +
+  ylab("Percentage variance explained") +
+  theme_classic()
+#wow ok thats fairly low
+#the highest PVE is over, for the strict one it was closer to 8, and the lazy one was lower
+
+##calculate the cumulative sum of the pve##
+cumsum(ideal_pve$pve)
+#so PV 1,2,3 only account for 22% of the data
+#this is more than the lazy
+
+
+###graph the PVA###
+ideal_bi_pca_plot=ggplot(ideal_bi_pca, aes(PC1, PC2))+
+  geom_point(size = 2) + 
+  #coord_equal() + 
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(ideal_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(ideal_pve$pve[2], 3), "%)")) +
+  labs(title = "113 SNPs with 'ideal' VCF filtering with biallelic sites and LD pruning")
+ideal_bi_pca_plot
+```
+
+### Compare the PCA plots
+```{r}
+strict_pca_plot | ideal_pca_plot | lazy_pca_plot | lazy_np_pca_plot
+```
+### Takeaways
+Visually, there is no strong clustering evident in the PCAs meaning there aren't any obvious populations. In the PCA with no linkage pruning and the most SNPs, there is one outlier sample that is quite far from the main cluster. This could be a tetraploid that slipped in on accident.
+
+
+## ADMIXTURE
+Using ADMIXTURE is another way to identify population structure. I ran the ADMIXTURE analysis on the terminal with the possibility of having 2-25 populations (K= 2:40) with 10 replicates per K. Using the average cross-validation scores (CV), the number of populations can be identified. If there is an obvious "elbow" in the graph of the CV scores, then that is the appropriate number of populations based on this model.
+
+Since the PCAs had very similar results, I used the ideal VCF filtering scenario to run ADMIXTURE.
+```{r}
+###import data###
+CV_idealbi_2n=read_table("combined.cv.error", col_names = FALSE)
+
+
+###we have 10 replicates for each K value, so average them all###
+CV_ideal_2n_summary=CV_idealbi_2n %>% 
+  group_by(X1) %>% 
+  summarize(n=length(X1),
+            mean=mean(X2),
+            sd=sd(X2),
+            se=sd/sqrt(n),
+            lower.CI=mean-(1.96*se),
+            upper.CI=mean+(1.96*se)) %>% 
+  rename(K="X1")
+
+###plot the cross validation scores###
+ideal_2n_CV_plot=ggplot(CV_ideal_2n_summary, aes(K, mean)) +
+  geom_point() +
+  #geom_smooth() +
+  theme_classic() +
+  ggtitle("Cross-Validation Scores from ADMIXTURE (K= 1-40)")
+ideal_2n_CV_plot
+
+ideal_2n_allCV_plot=ggplot(CV_idealbi_2n, aes(X1, X2)) +
+  geom_point() +
+  geom_smooth(color = "forestgreen", fill = "forestgreen", linewidth = 0.5, method = "loess", alpha = 0.3) +
+  theme_classic() +
+  ggtitle("All Cross-Validation Scores from ADMIXTURE (K= 1-40)") +
+  xlab("Number of Populations (K)") + ylab("Cross-Validation Score")
+ideal_2n_allCV_plot
+```
+Well this graph is pretty linear. There is a slight elbow at K=24, but I worry that is not biologically meaningful.
+
+### Takeaways
+There doesn't seem to be any population structure. This is unsurprising, but a little disappointing.
+```{r}
+(strict_pca_plot | ideal_pca_plot) / (lazy_pca_plot | lazy_np_pca_plot) / ideal_2n_CV_plot
+```
+
+# Genetic Diversity
+
+For genetic diversity, I need to do this 3 times. 1) The total genetic diversity of all diploid samples, then I want to split it into 2) before DED, and 3) after DED. For now, the cutoff is 1975, but depending on results, it may be beneficial to explore moving that date around. 
+
+I am going to continue to use the ideal VCF filtering because that is the one that kept all 78 individuals.
+
+Metrics of genetic diversity: allelic richness (Ar), expected heterozygosity (He), observed heterozygosity (Ho), and inbreeding (Fis).
+
+Tutorials used: https://popgen.nescent.org/StartSNP.html, https://medium.com/@tarangds/knn-imputation-the-complete-guide-146f932870a7
+
+## Impute Missing Data
+From here on out, these programs cannot handle missing data. So, I need to find a way to impute the missing genotypes. For this, I want to do a nearest neighbor approach. What this does, is take the most genetically similar individuals and impute the most common genotype (alternatively you can use the mean but most of these programs can only handle discreet genotypes).
+
+Note from 10/2025: I updated this to reflect the vcf with only biallelic sites and LD pruning!
+```{r, include=FALSE}
+###import data###
+##for this I need a genind object
+ideal_vcf_ld=read.vcfR("final_2n_ideal_LDpruned.vcf", verbose = FALSE)
+
+###convert to genind
+ideal_genind=vcfR2genind(ideal_vcf_ld)
+```
+
+```{r}
+###convert the genotypes
+##convert genind to dataframe
+diploid_df=genind2df(ideal_genind)
+##fix rownames
+rownames(diploid_df) <- gsub("^(.*)_\\1$", "\\1", rownames(diploid_df))
+##convert alleles to numeric genotypes
+diploid_geno=apply(diploid_df, 2, function(x) {
+  x[x == "00"] <- 0  # A/A
+  x[x == "01"] <- 1  # A/B
+  x[x == "10"] <- 1  # B/A
+  x[x == "11"] <- 2  # B/B
+  as.numeric(x)
+})
+##make sure its all numeric
+diploid_geno=as.data.frame(diploid_geno)
+##convert rownames
+rownames(diploid_geno) <- rownames(diploid_df)
+
+###calculate genetic similarity
+library(proxy)
+
+##compute pairwise distances (ignoring NAs)
+diploid_geno_dist=dist(diploid_geno, method = "euclidean")
+diploid_geno_dist_matrix=as.matrix(diploid_geno_dist)
+
+###impute using k nearest neighbor
+##make a function for mode
+get_mode <- function(v) {
+  v <- v[!is.na(v)]
+  if (length(v) == 0) return(NA)
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+##make the function
+impute_knn <- function(genotype_matrix, dist_matrix, k = 5) {
+  imputed <- genotype_matrix
+  for (i in 1:nrow(genotype_matrix)) {
+    missing_loci <- which(is.na(genotype_matrix[i, ]))
+    if (length(missing_loci) > 0) {
+      neighbors <- order(dist_matrix[i, ], decreasing = FALSE)[2:(k + 1)]
+      for (locus in missing_loci) {
+        neighbor_values <- genotype_matrix[neighbors, locus]
+        mode_val <- get_mode(neighbor_values)
+        if (!is.na(mode_val)) {
+          imputed[i, locus] <- mode_val
+        }
+      }
+    }
+  }
+  rownames(imputed) <- rownames(genotype_matrix)
+  return(imputed)
+}
+
+##generate the output
+diploid_impute=impute_knn(diploid_geno, diploid_geno_dist_matrix, k=5)
+head(diploid_impute)
+
+##double check
+sum(is.na(diploid_impute))
+#it worked!!!
+
+###convert back to genind
+##convert back to alleles
+geno_char=as.data.frame(lapply(diploid_impute, function(x) {
+  x <- as.character(x)
+  x[x == "0"] <- "00"
+  x[x == "1"] <- "01"
+  x[x == "2"] <- "11"
+  return(x)
+}))
+rownames(geno_char)=rownames(diploid_impute)
+
+##convert to genind
+colnames(geno_char) <- paste0("Locus", seq_len(ncol(geno_char)))
+
+diploid_impute_genind=df2genind(geno_char, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(geno_char))
+```
+## All diploid samples
+Here I am going to run all of the diploid samples, so both from before and after DED to get an understanding of all genetic diversity. I am going to use the hierfstat package for most of this. This package uses the WRONG MATH for Fst, so we're going to ignore that part.
+```{r}
+diploid_stats=basic.stats(diploid_impute, diploid = TRUE, digits = 4)
+diploid_stats$overall
+```
+Interesting! Without He, it's hard to draw conclusions about Ho, but Fis is really low! There seems to be a lot of outcrossing going on here. *it looks like Hs=He
+
+### Heterozygosity
+So, in the package hierfstat, Hs is the same as He. But, I want to try a few other techniques to determine if the values hierfstat::basic.stats() gives us are accurate. 
+```{r, include=FALSE}
+###fix up the data
+##assign dummy population, since we still don't know structure
+##this is required for genind2hierfstat
+diploid_impute_genind@pop=factor(rep("Pop1", nInd(diploid_impute_genind)))
+
+##convert to hierfstat
+diploid_impute_hier=genind2hierfstat(diploid_impute_genind)
+
+###calculate diversity metrics with adegenet
+diploid_div=adegenet::summary(diploid_impute_genind)
+diploid_div
+names(diploid_div)
+```
+
+#### Observed Heterozygosity
+```{r}
+###average Ho
+mean(diploid_div$Hobs)
+#0.5545723
+
+###graph it
+plot(diploid_div$Hobs, xlab= "Loci", ylab= "Observed Heterozygosity", main= "Observed Heterozygosity per Locus")
+```
+So, hierfstat calculated Ho to be 0.5932, but adegenet gave us 0.5545723 So it is a little different based on the program.
+### Expected Heterozygosity
+```{r}
+###average He
+mean(diploid_div$Hexp)
+#0.3980512
+
+###plot Ho and He for each loci
+plot(diploid_div$Hobs,diploid_div$Hexp, xlab="Hobs", ylab="Hexp", 
+     main="He as a function of Ho per locus")
+```
+Weird looking graph. If He=Hs in hierfstat, then the value is 0.3681 which is very similar to adegenet's calculation of He which is 0.3570.
+
+### Observed = Expected???
+Now to test if Ho = He. 
+```{r}
+###test if the variances are the same
+bartlett.test(list(diploid_div$Hexp, diploid_div$Hobs))
+#the variances are not equal (p<0.05), so need to do a Welch's t-test and take into account the variances
+
+###Welch's t-test
+het_diploid_ttest=t.test(diploid_div$Hexp, diploid_div$Hobs, var.equal = FALSE)
+het_diploid_ttest
+```
+Well lookee here, there is a difference between observed and expected heterozygosity! Because our p-value is so low we can reject our null hypothesis (Ho=He). We need to dive deeper and see if it's out of HWE. We might be able to conclude something about a recent bottleneck, but we would need to confirm that by running BOTTLENECK.
+
+### Hardy-Weinberg Equilibrium
+Sooooo, how many loci in HWE? We already know that we violate a bunch of the assumptions for HWE, but it can be informative nonetheless.
+```{r, include=FALSE}
+###run the test
+diploid_HWE=hw.test(diploid_impute_genind, B = 1000)
+diploid_HWE=as.data.frame(diploid_HWE)
+
+###count how many loci are in and out of HWE
+alpha=0.05
+
+##out of HWE
+diploid_out_HWE=sum(diploid_HWE$Pr.exact < alpha)
+diploid_out_HWE
+#68
+
+##in HWE
+diploid_in_HWE=sum(diploid_HWE$Pr.exact >= alpha)
+diploid_in_HWE
+#45
+```
+Well there are 68 loci out of HWE and 45 loci in HWE. This can fluctuate a little since there are only 1000 bootstraps.
+
+## Compare before and after DED
+So, our cutoff for before/after DED is 1975. This is more or less an arbitrary number based on the spread of DED. Technically, before/after DED is different for each region, but doing it that way is way too complicated because I would need to dig through historical records.
+```{r, include=FALSE}
+###import samples and the year they were collected
+year=read.csv("samples_and_year.csv", header = T)
+
+###make a list of samples from after DED
+postDED_list=year %>% 
+  filter(year >= 1975) %>% 
+  mutate(DED= "postDED")
+
+###make a list of samples from before DED
+preDED_list=year %>% 
+  filter(year < 1975) %>% 
+  mutate(DED= "preDED")
+
+###big dataframe
+DED_list=merge(preDED_list, postDED_list, all = T)
+
+
+###filter SNP data into before/after DED
+##we need to make the row names of the SNP data into a column
+diploid_impute$ind=rownames(diploid_impute)
+##add pre/post DED
+diploid_impute_DED=right_join(DED_list, diploid_impute, by = "ind")
+##maintain row names
+rownames(diploid_impute_DED)=rownames(diploid_impute)
+##remove unnecessary columns
+diploid_impute_DED=diploid_impute_DED %>% dplyr::select(-ind, -year)
+##covert back to alleles
+diploid_impute_DED=as.data.frame(lapply(diploid_impute_DED, function(x) {
+  x <- as.character(x)
+  x[x == "0"] <- "00"
+  x[x == "1"] <- "01"
+  x[x == "2"] <- "11"
+  return(x)
+}))
+rownames(diploid_impute_DED)=rownames(diploid_impute)
+
+###create dataframes for pre/post DED
+##preDED
+preDED_diploid=diploid_impute_DED %>% 
+  filter(DED=="preDED") %>% 
+  dplyr::select(-DED)
+#41 indiciduals
+
+##postDED
+postDED_diploid=diploid_impute_DED %>% 
+  filter(DED=="postDED") %>% 
+  dplyr::select(-DED)
+#37 individuals
+
+###convert to geninds
+##preDED
+colnames(preDED_diploid) <- paste0("Locus", seq_len(ncol(preDED_diploid)))
+diploid_preDED_genind=df2genind(preDED_diploid, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(preDED_diploid))
+##post DED
+colnames(postDED_diploid) <- paste0("Locus", seq_len(ncol(postDED_diploid)))
+
+diploid_postDED_genind=df2genind(postDED_diploid, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(postDED_diploid))
+##add dummy populations so it'll calculate div stats
+diploid_preDED_genind@pop=factor(rep("preDED", nInd(diploid_preDED_genind)))
+diploid_postDED_genind@pop=factor(rep("postDED", nInd(diploid_postDED_genind)))
+
+
+##make one big genind that treats pre/postDED as populations
+##extract the "populations"
+DED_vector=diploid_impute_DED$DED
+diploid_impute_DED=diploid_impute_DED %>% dplyr::select(-DED)
+
+##covert to genind
+colnames(diploid_impute_DED) <- paste0("Locus", seq_len(ncol(diploid_impute_DED)))
+diploid_DED_genind=df2genind(diploid_impute_DED, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(diploid_impute_DED), pop = as.factor(DED_vector))
+
+##verify it worked
+genind2df(diploid_DED_genind)
+```
+
+So, for this part, I want to use the genind that had pre/postDED as populations.
+```{r, include=FALSE}
+DED_div=basic.stats(diploid_DED_genind)
+DED_div$overall
+
+DED_sum=adegenet::summary(diploid_DED_genind)
+DED_sum
+```
+
+### Allelic Richness
+```{r}
+###calculate allelic richness
+##use popgenreport
+popgenreport(diploid_DED_genind, mk.allel.rich=TRUE, mk.pdf=FALSE)
+
+##use adegenet
+DED_sum=adegenet::summary(diploid_DED_genind)
+DED_sum
+
+###check for private alleles
+private_alleles(diploid_DED_genind, level = "population", count.alleles = TRUE)
+```
+Ok so in both pre and post DED there are 226 alleles and no private alleles. I think this might have something to do with how I imputed data using the nearest neighbor technique. BUT if I were to run it on the geninds with missing data, then the postDED group would have a higher allelic richness because the more recent samples have less missing data.
+
+### Ho and Fis
+
+```{r}
+preDED_div=basic.stats(diploid_preDED_genind)
+preDED_div$overall
+
+postDED_div=basic.stats(diploid_postDED_genind)
+postDED_div$overall
+```
+Before DED, Fis was -0.3969 and Ho was 0.5597. After DED, Fis -0.3997 and observed Ho is 0.5621.
+
+#### Ho: T-test and graph
+In order to prove that observed heterozygosity did not change before and after DED, you need to run a t-test.
+
+For this one, we are going to use the results from basic.stats which has Ho per locus.
+```{r}
+###make a data frame of the Ho values for before and after DED
+##preDED
+preDED_ho_locus=preDED_div$Ho
+preDED_ho_locus=as.data.frame(preDED_ho_locus)
+preDED_ho_locus=preDED_ho_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(preDED="1")
+##postDED
+postDED_ho_locus=postDED_div$Ho
+postDED_ho_locus=as.data.frame(postDED_ho_locus)
+postDED_ho_locus=postDED_ho_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(postDED="1")
+
+###run the t-test
+diploid_ho_ttest=t.test(preDED_ho_locus$preDED, postDED_ho_locus$postDED, paired = TRUE)
+diploid_ho_ttest
+
+###extract the p-values
+Ho_pvalue=diploid_ho_ttest$p.value
+```
+The p-value is 0.8253, so there is no significant different between Ho before and after DED.
+
+#### Fis: T-test and graph
+In order to prove that Fis did not change before and after DED, you need to run a t-test.
+
+For this one, we are going to use the results from basic.stats which has Fis per locus. I'm basically going to use the same code as above just with Fis.
+```{r}
+###make a data frame of the Fis values for before and after DED
+##preDED
+preDED_Fis_locus=preDED_div$Fis
+preDED_Fis_locus=as.data.frame(preDED_Fis_locus)
+preDED_Fis_locus=preDED_Fis_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(preDED="1")
+##postDED
+postDED_Fis_locus=postDED_div$Fis
+postDED_Fis_locus=as.data.frame(postDED_Fis_locus)
+postDED_Fis_locus=postDED_Fis_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(postDED="1")
+
+###run the t-test
+diploid_Fis_ttest=t.test(preDED_Fis_locus$preDED, postDED_Fis_locus$postDED, paired = TRUE)
+diploid_Fis_ttest
+
+###extract the p-values
+Fis_pvalue=diploid_Fis_ttest$p.value
+```
+Well just like with the Ho, there is no significant difference between before or after DED in regards to Fis.
+
+#### Graph the lack of difference
+For presentations and publications, I want to visually display these results.
+```{r}
+###combine to make Ho and Fis dataframes
+##make the ind column
+preDED_ho_locus$loci=rownames(preDED_ho_locus)
+postDED_ho_locus$loci=rownames(postDED_ho_locus)
+preDED_Fis_locus$loci=rownames(preDED_Fis_locus)
+postDED_Fis_locus$loci=rownames(postDED_Fis_locus)
+##combine them
+diploid_Ho_results=left_join(preDED_ho_locus, postDED_ho_locus, by = "loci")
+diploid_Fis_results=left_join(preDED_Fis_locus, postDED_Fis_locus, by = "loci")
+##handle the rownames
+rownames(diploid_Ho_results) <- diploid_Ho_results$loci
+rownames(diploid_Fis_results) <- diploid_Fis_results$loci
+
+###covert to long format
+diploid_ho_long <- diploid_Ho_results %>%
+  pivot_longer(cols = c(preDED, postDED), names_to = "DED", values_to = "Ho")
+diploid_fis_long <- diploid_Fis_results %>%
+  pivot_longer(cols = c(preDED, postDED), names_to = "DED", values_to = "Fis")
+
+###graph it
+ho_graph=ggplot(diploid_ho_long, aes(x = DED, y = Ho, fill = DED)) +
+  geom_boxplot(show.legend = FALSE, width = 0.3, fill = c("seagreen", "seagreen2")) +
+  geom_jitter(width = 0.05, alpha = 0.8, show.legend = FALSE, color = "cornflowerblue") +
+  labs(title = "Observed Heterozygosity (Ho) per Locus", x = "", y = "Observed Heterozygosity (Ho)", subtitle = "p-value=0.8253") +
+  theme_classic()
+
+fis_graph=ggplot(diploid_fis_long, aes(x = DED, y = Fis, fill = DED)) +
+  geom_boxplot(show.legend = FALSE, width = 0.3, fill = c("seagreen", "seagreen2")) +
+  geom_jitter(width = 0.05, alpha = 0.8, show.legend = FALSE, color = "cornflowerblue") +
+  labs(title = "Inbreeding Coefficient (Fis) per Locus", x = "", y = "Inbreeding (Fis)", subtitle = "p-value=0.9017") +
+  theme_classic()
+
+ho_graph | fis_graph
+```
+So, clearly there aren't any significant differences in genetic diversity before and after DED and we proved that with t-tests of observed heterozygosity (Ho) and inbreeding (Fis). If DED had affected genetic diversity, then there would have been a decrease in Ho and an increase in Fis.
+
+After running BOTTLENECK, there seems to be evidence of a recent genetic bottleneck. So, I want to run one last test to make sure there are no differences in genetic diversity before and after DED.
+
+#### AMOVA
+Alrighty, let's do an AMOVA (analysis of molecular variance) to compare before and after DED. The main package to do this is poppr and it has two options ade4 and pegas. I want to do the ade4.
+
+We need to add the "populations" as strata. I included the year and pre and post DED as the population hierarchy but only ran the pre/post.
+```{r}
+###add the pre and post DED list as strata
+##get the samples we have in diploids
+DED_list_diploid=rownames(diploid_impute)
+##rename the column
+DED_list_diploid=as.data.frame(DED_list_diploid)
+names(DED_list_diploid)[1]="ind"
+##add the DED data
+DED_list_diploid=left_join(DED_list_diploid, DED_list, by = "ind")
+  
+##add as strata
+strata(diploid_impute_genind)=DED_list_diploid[-1]
+
+###AMOVA
+amova_ade4=poppr.amova(diploid_impute_genind, hier = ~DED, method = "ade4", within = FALSE)
+amova_ade4
+```
+So most of the variation is within the "populations" not between them. There is a small difference between them, but it doesn't look biologically meaningful. Only ~2% of the variance is between populations and ~98% is within the populations. This might have something to do with the landscape playing a role rather than the impact of DED.
+
+
+# Landscape Genetics
+I am investigating the hypothesis that the population structure will be associated with watersheds. So far, we don't have population structure.
+
+## Isolation by barrier
+```{r, include=FALSE}
+###to download all neccessary packages
+#alazygatr_packages()
+
+###make coordinate dataframe
+coords=read.csv("samples_and_coords.csv", header = F)
+coords=coords %>% 
+  dplyr::rename(ind="V1", lat= "V2", long="V3") %>% 
+  relocate(long, .before = lat)
+
+##make rownames a column so you can join
+diploid_impute_DED$ind=rownames(diploid_impute_DED)
+diploid_impute_DED$ind
+##remove loci that have NAs
+diploid_impute_clean <- diploid_impute_DED[, colSums(is.na(diploid_impute_DED)) == 0]
+
+##can only have individuals with coords
+diploid_DED_coords=right_join(coords, diploid_impute_clean, by = "ind")
+diploid_DED_coords=diploid_DED_coords %>% 
+  drop_na() %>% 
+  arrange(ind)
+#now I have a dataframe with the ind, coords, no NAs, and SNP info
+
+##extract the coords into a data frame
+diploid_coords=data.frame(ind=diploid_DED_coords$ind, long=diploid_DED_coords$long, lat=diploid_DED_coords$lat)
+##convert the ind column into rownames
+rownames(diploid_coords) <- diploid_coords$ind
+##remove the ind column
+diploid_coords=diploid_coords %>% dplyr::select(-ind)
+
+
+###convert to genind
+##get rid of lat and long
+diploid_coords_land=diploid_DED_coords %>% dplyr::select(-lat, -long)
+##convert ind column to rownames
+rownames(diploid_coords_land) <- diploid_coords_land$ind
+##remove ind column
+diploid_coords_land=diploid_coords_land %>% dplyr::select(-ind)
+##convert to genind
+diploid_land_genind=df2genind(diploid_coords_land, sep = "", ncode = 2, ploidy = 2, ind.names=rownames(diploid_coords_land))
+##add dummy pop
+diploid_land_genind@pop=factor(rep("pop1", nInd(diploid_land_genind)))
+```
+Yay now everything is set up to run various landscape genetics things!
+
+### TESS3r
+If this works (I haven't been lucky before), then it will create this really cool map that shows the population structure across the landscape with a gradient between them. This has been one of my goals to get working since I started. *update: it worked! sort of, kind of, good enough
+
+It needs two files: a dataframe with genotypes (0, 1, 2), and coordinates. Luckily, we can easily make the dataframe and already have the coordinates.
+```{r}
+###Convert to genotypes instead of alleles
+##the dataframe we want to use for genotypes is diploid_coords_land
+##need to convert that from 00, 01, 11, etc. to 0, 1, 2
+##convert alleles to numeric genotypes
+diploid_land_geno=apply(diploid_coords_land, 2, function(x) {
+  x[x == "00"] <- 0  # A/A
+  x[x == "01"] <- 1  # A/B
+  x[x == "10"] <- 1  # B/A
+  x[x == "11"] <- 2  # B/B
+  as.numeric(x)
+})
+
+##only do this IF YOU HAVE TRIALLELIC DATA
+#ok so because TESS has opinions on alternate alleles, you can only have 3 genotypes (so 0+1+2=3), so I need to remove any loci with alternate allleles
+##find the loci and remove them
+#triallelic_loci=which(apply(diploid_land_geno, 2, function(x) any(x > 2, na.rm = TRUE)))
+#diploid_land_geno_filtered=diploid_land_geno[, -triallelic_loci]
+# so that actually only got rid of 3 loci, yay!
+##fix the rownames
+#rownames(diploid_land_geno)=rownames(diploid_coords_land)
+
+###convert coords to matrix
+diploid_coords_matrix=as.matrix(diploid_coords)
+
+###make a map!!!
+plot(diploid_coords, pch = 19, cex = 0.5, xlab = "Longitude", ylab = "Latitude")
+map(add = T, interior = F)
+#OMG IT WORKED
+
+###make the TESS object
+diploid_tess=tess3r::tess3(X = diploid_land_geno, coord = diploid_coords_matrix, K = 1:40, method = "projected.ls", ploidy = 2, openMP.core.num = 4)
+
+###plot the cross validation scores
+diploid_tess_cv_plot=plot(diploid_tess, pch = 19, col = "black", xlab = "Number of Ancestral Pops", ylab = "Cross-Validation Score", main = "Cross-Validation Scores from TESS")
+diploid_tess_cv_plot
+#so that's the same ugly line we have been getting
+#I'm going to move forward with 9 because that is the watershed hypothesis
+
+###Ancestry matrix
+##make the color palatte
+my.colors <- c("maroon", "palegreen4", "dodgerblue3", "goldenrod2","sienna3")
+my.palette <- CreatePalette(my.colors, 9)
+
+##extract the matrix
+qmatrix9=qmatrix(diploid_tess, K = 9)
+
+###create a barplot
+#colors <- rainbow(ncol(qmatrix9))
+#bp=barplot(qmatrix9, border = NA, space = 0, xlab = "Individuals", ylab = "Ancestry Proportions", main = "Ancestry Matrix", col = colors) 
+#axis(1, at = bp, labels = bp$order, las = 3, cex.axis = 0.4)
+
+###map
+#plot(qmatrix9, diploid_coords_matrix, asp = 1, method = "map.max", interpol = FieldsKrigModel(10), 
+#     main = "Ancestry Coefficients (K=9)",
+#     xlab = "Longitude", ylab = "Latitude", 
+#     resolution= c(300,300), cex = 0.4, 
+#     xlim = c(-105, -75), ylim = c(24, 41))
+
+
+###again but with K=3
+##extract the matrix
+qmatrix3=qmatrix(diploid_tess, K = 3)
+
+##create a barplot
+#colors <- rainbow(ncol(qmatrix9))
+#bp=barplot(qmatrix3, border = NA, space = 0, xlab = "Individuals", ylab = "Ancestry Proportions", main = "Ancestry Matrix", col = colors)
+#axis(1, at = bp, labels = bp$order, las = 3, cex.axis = 0.4)
+
+##map
+plot(qmatrix3, diploid_coords_matrix, asp = 1, method = "map.max", interpol = FieldsKrigModel(3), 
+     main = "Ancestry Coefficients (K=3)",
+     xlab = "Longitude", ylab = "Latitude", 
+     resolution= c(300,300), cex = 0.4, col = my.palette,
+     xlim = c(-105, -75), ylim = c(24, 41))
+
+##try again with ggplot
+map.polygon <- getMap(resolution = "high")
+ggtess3Q(qmatrix3, diploid_coords_matrix, map.polygon = map.polygon) +
+  #scale_fill_manual(values = my.palette) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  xlim(-103, -80) + 
+  ylim(24, 41) + 
+  coord_equal() + 
+  geom_point(data = diploid_coords, aes(x = long, y = lat), size = 1) + 
+  xlab("Longitute") +
+  ylab("Latitude") + 
+  labs(title="Ancestry Coefficient (K=3)") +
+  theme_bw()
+
+###again but with K=2
+##extract the matrix
+qmatrix2=qmatrix(diploid_tess, K = 2)
+
+##create a barplot
+#colors <- rainbow(ncol(qmatrix9))
+#bp=barplot(qmatrix3, border = NA, space = 0, xlab = "Individuals", ylab = "Ancestry Proportions", main = "Ancestry Matrix", col = colors)
+#axis(1, at = bp, labels = bp$order, las = 3, cex.axis = 0.4)
+
+##map
+plot(qmatrix2, diploid_coords_matrix, asp = 1, method = "map.max", interpol = FieldsKrigModel(3), 
+     main = "Ancestry Coefficients (K=2)",
+     xlab = "Longitude", ylab = "Latitude", 
+     resolution= c(300,300), cex = 0.4, col = my.palette,
+     xlim = c(-105, -75), ylim = c(24, 41))
+
+##try again with ggplot
+map.polygon <- getMap(resolution = "high")
+ggtess3Q(qmatrix2, diploid_coords_matrix, map.polygon = map.polygon) +
+  #scale_fill_manual(values = my.palette) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  xlim(-103, -80) + 
+  ylim(24, 41) + 
+  coord_equal() + 
+  geom_point(data = diploid_coords, aes(x = long, y = lat), size = 1) + 
+  xlab("Longitute") +
+  ylab("Latitude") + 
+  labs(title="Ancestry Coefficient (K=2)") +
+  theme_bw()
+```
+So the CV scores are the same as we expected, which is that there is one pretty homogeneous population. But, I played around with K=9, 3, and 2 just to see what it looked like. It looked like a mess :) The K=3 graphs look pretty interesting, there seems to be some population barriers. The K=9 shows no geographic barriers. In the future, I would like to look at this pre and post DED to see if that changes anything.
+
+### PCA Watersheds
+One thing to note is we only have representatives from 10 watersheds.
+```{r}
+###import the watershed information
+watersheds=read.csv("samples_and_watersheds.csv", header = T)
+
+###clean up that very messy dataframe
+watersheds=watersheds %>% 
+  dplyr::select(Sample_ID, huc2, name) %>% 
+  dplyr::rename(ind=Sample_ID, watersheds=name)
+
+###fix up the PCA dataframe
+ideal_pca=ideal_bi_pca %>% 
+  tidyr::separate(ind, into = c("pop", "ind"), sep = "_")
+
+###join the dataframes
+ideal_pca_watersheds=left_join(ideal_pca, watersheds, by = "ind")
+
+unique(ideal_pca_watersheds$watersheds)
+
+###graph it!!!
+ggplot(ideal_pca_watersheds, aes(PC1, PC2, color = watersheds)) +
+  geom_point(size = 3) + 
+  #coord_equal() + 
+  scale_color_manual(values = c("grey", "#CE4441FF", "#FFBB44FF", "#62929AFF", "#23469c", "#EB7926FF", "cornflowerblue", "#004F63FF", "#9467bd", "#592688")) +
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(ideal_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(ideal_pve$pve[2], 3), "%)")) +
+  labs(title = "Ideal PCA with Watersheds")
+```
+### Admixture by watershed
+For this we have 9 watersheds that the diploids are in so we need the admixture results from K=9.
+```{r}
+###import the qmatrix data###
+qmatrix=read.table("final2n_ideal_LDpruned.9.1.Q")
+nrow(qmatrix)
+##add the sample IDs
+qmatrix_samples=read.table("final2n_ideal_LDpruned.fam")$V2
+rownames(qmatrix)=qmatrix_samples
+admixture_df=cbind(Sample_ID=rownames(qmatrix), qmatrix)
+
+##fix the admixture df
+admixture_df=admixture_df %>% 
+  separate(Sample_ID, into = c("ind", "del"), sep = "_") %>% 
+  dplyr::select(-del)
+  
+
+###merge the dataframes###
+admixture_df=merge(admixture_df, watersheds, by = "ind")
+
+###clean it up###
+##rename columns
+admixture_df <- admixture_df %>%
+  dplyr::rename(
+    SampleID  = ind,
+    Cluster1  = V1,
+    Cluster2  = V2,
+    Cluster3  = V3,
+    Cluster4  = V4,
+    Cluster5  = V5,
+    Cluster6  = V6,
+    Cluster7  = V7,
+    Cluster8  = V8,
+    Cluster9  = V9,
+    Watershed = watersheds)
+##remove any ind not in a watershed
+admixture_df=admixture_df %>% filter(!is.na(Watershed) & Watershed != "")
+
+
+###assign colors for the map###
+cluster_colors=c("#CE4441FF", "#EE8577FF", "#FFBB44FF", "#62929AFF", "#23469c", "#EB7926FF", "cornflowerblue", "#004F63FF", "#592688")
+cluster2_colors=c("#EB7926FF", "#e5b58e",  "#c969a1", "#592688", "#8164a5", "#004F63FF", "#8b9fa9", "#859b6c", "#bac4ab")
+
+```
+Now I that the prep is done, I want to make the structure plot for the 12 watersheds and combine them into one big figure.
+```{r}
+###graph it###
+##reshape the data to long format
+admix_long=admixture_df %>%
+  pivot_longer(
+    cols = starts_with("Cluster"),
+    names_to = "Cluster",
+    values_to = "Proportion")
+##determine dominant cluster
+dominant_df=admix_long %>%
+  group_by(SampleID, Watershed) %>%
+  slice_max(order_by = Proportion, n = 1, with_ties = FALSE) %>%
+  dplyr::select(SampleID, Watershed, DominantCluster = Cluster, DominantProportion = Proportion)
+##merge the two dataframes
+admix_long=admix_long %>%
+  left_join(dominant_df, by = c("SampleID", "Watershed"))
+##reorder based on dominant cluster
+admix_long=admix_long %>%
+  mutate(SampleID = fct_reorder(SampleID, DominantProportion, .desc = TRUE))
+##time to graph it!
+ggplot(admix_long, aes(x = SampleID, y = Proportion, fill = Cluster)) +
+  geom_bar(stat = "identity", width = 0.9) +
+  facet_wrap(~ Watershed, ncol = 2, nrow = 6, scales = "free_x") +
+  scale_fill_manual(values = cluster2_colors) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.spacing = unit(0.2, "lines"),
+    strip.text = element_text(size = 10),
+    legend.position = "right"
+  ) +
+  labs(y = "Proportion")
+```
+
+## Isolation by Distance
+### Mantel Tests
+Since there seems to be no population structure, I want to try checking for isolation by distance (IBB). To test this, we use something called a Mantel Test. This test compares a matrix of genetic distance with a matrix of geographic distance between individuals. There are two packages that can do this: vegan and ade4. It seems like the function from Vegan is a little better.
+
+This is the tutorial: https://bcm-uga.github.io/TESS3_encho_sen/articles/main-vignette.html
+```{r}
+###calculate geographic distance
+##create geographic distance matrix
+diploid_geodist_matrix=geodist(diploid_coords, measure = "Haversine")
+#head(diploid_geodist_matrix)
+
+###calculate genetic distance
+##I read a paper comparing different metrics for this, and Euclidean does not account for pop structure or ploidy
+##use the dist.genepop function in adegenet
+diploid_gendist_matrix=dist(tab(diploid_land_genind, freq = TRUE, NA.method = "mean"))
+#hist(diploid_gendist_matrix)
+#looks normal lol
+
+###mantel tests: vegan###
+##run the mantel test
+mantel_vegan=mantel(diploid_geodist_matrix, diploid_gendist_matrix, method = "spearman", permutations = 999)
+mantel_vegan
+
+####mantel tests: ade4####
+###ok so I didn't love the results of the mantel test
+###I want to try another one to corroborate the results
+##I need two dist objects
+diploid_geodist_matrix2=dist(diploid_geodist_matrix)
+mantel.rtest(diploid_geodist_matrix2, diploid_gendist_matrix, nrepet = 999)
+#still very low
+```
+The correlation between genetic and geographic distance is low (0.01496 and 0.01868). The p-values (0.346 and 0.352) are also above the 0.05 cutoff, which means we cannot reject the null hypothesis that there is not IBD. With this evidence, we can conclude that IBD is not a strong driving factor to population differentiation. This makes sense because there is no population differentiation.
+
+#### Visualize the Mantel Test
+Ok so I need a way to show this in a presentation. I believe showing a scatterplot with a regression would be an easy way to depict the lack of a pattern. I didn't know how to graph a matrix, so I consulted copilot.
+
+```{r}
+###extract the lower triangle of the matrix, excluding the diagonal
+geo_vec <- as.vector(diploid_geodist_matrix[lower.tri(diploid_geodist_matrix)])
+gen_vec <- as.vector(diploid_gendist_matrix[lower.tri(diploid_gendist_matrix)])
+
+###create a dataframe of these two vectors
+mantel_df <- data.frame(
+  Geographic_Distance = geo_vec,
+  Genetic_Distance = gen_vec)
+
+###graph it!
+ggplot(mantel_df, aes(x = Geographic_Distance, y = Genetic_Distance)) +
+  geom_point(alpha = 0.3, color = "#8164a5", size = 1) +
+  geom_smooth(method = "lm", color = "#004F63FF", fill = "#004F63FF", se = TRUE) +
+  labs(
+    title = "Isolation by Distance in American Elm",
+    subtitle = "Mantel Test: Genetic vs Geographic Distance",
+    x = "Geographic Distance (km)",
+    y = "Genetic Distance (Euclidean)") +
+  theme_classic()
+```
+
+## wingen: Areas for Conservation Focus (places that have high genetic diversity)
+So one thing Charlie requested is to know where there are areas of high genetic diversity that would be good for targeting for conservation and to source seed from. I found the R package wingen that will generate a raster map with sliding windows and visualize the areas of high diversity. Let's try it out!
+
+We need 4 files: genetic data (vcf without impute data), coordinates (diploid_coords), raster layer (can create it), and range (outlining the range/maybe a map of the US?)
+```{r}
+###import VCF
+ideal_vcf_ld=read.vcfR("final_2n_ideal_LDpruned.vcf", verbose = FALSE)
+
+###fix vcf
+##remove NA16 an UE03
+ideal_vcf_ld@gt <- ideal_vcf_ld@gt[, !(colnames(ideal_vcf_ld@gt) %in% c("NA16_NA16", "UE03_UE03"))]
+
+###create a raster
+##there are a few things we can change here:
+##buffer= adds to edge of raster
+##res= resolution
+##agg and disagg
+#diploid_raster1=coords_to_raster(diploid_coords, buffer = 1, plot = TRUE)
+#diploid_raster2=coords_to_raster(diploid_coords, buffer = 1, agg = 2, plot = TRUE)
+#diploid_raster3=coords_to_raster(diploid_coords, buffer = 1, disagg = 4, plot = TRUE)
+#diploid_raster4=coords_to_raster(diploid_coords, buffer = 1, res = 10, plot = TRUE)
+#diploid_raster5=coords_to_raster(diploid_coords, buffer = 4, agg = 2, res = 1, plot = TRUE)
+diploid_raster6=coords_to_raster(diploid_coords, buffer = 4, disagg = 4, agg = 2, res = 1, plot = TRUE)
+#So there are many different ways to do this, and we should experiment later on with the different raster layers
+
+###before running, we want to check out what the windows will look like
+preview_gd(diploid_raster6, diploid_coords, method = "window", wdim = 3, fact = 3, sample_count = TRUE, min_n = 2)
+#so we want something between 1, 3, and 5
+#so I made raster6 and that should be good
+```
+### Nucleotide Diversity (pi)
+```{r}
+###run windows with pi
+diploid_wgd_pi=window_gd(ideal_vcf_ld, diploid_coords, diploid_raster6, stat = "pi", wdim = 3, fact = 3, rarify = TRUE, rarify_n = 2, rarify_nit = 5, L = 100)
+
+##plot it
+ggplot_gd(diploid_wgd_pi, bkg = map.polygon) +
+  ggtitle("Moving Window Pi") +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "cornflowerblue") +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-105, -70) + 
+  ylim(24, 45) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+  
+#thats cool! but its really pixelated
+
+##try mapping it with Krig
+##this will smooth it a little bit so its not so pixelated
+diploid_kgd_pi=krig_gd(diploid_wgd_pi, index = 1, grd = diploid_raster6, disagg_grd = 2)
+ggplot_gd(diploid_kgd_pi) +
+  ggtitle("Kriged pi") +
+    geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "cornflowerblue") +
+  theme_bw() +
+   xlim(-105, -70) + 
+  ylim(24, 45) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+
+##mask the krig
+diploid_mgd_pi=mask_gd(diploid_kgd_pi, map.polygon)
+ggplot_gd(diploid_mgd_pi) +
+  ggtitle("Kriged & masked pi") +
+  xlim(-105, -70) + 
+  ylim(24, 45) +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "cornflowerblue") +
+  theme_bw() +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+```
+
+### Observed Heterozygosity (Ho)
+```{r}
+###run windows with Ho
+diploid_wgd_ho=window_gd(ideal_vcf_ld, diploid_coords, diploid_raster6, stat = "Ho", wdim = 3, fact = 3, rarify = TRUE, rarify_n = 2, rarify_nit = 5, L = 100)
+
+##plot it
+ggplot_gd(diploid_wgd_ho, bkg = map.polygon) +
+  ggtitle("Moving Window Ho") +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "cornflowerblue") +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-105, -70) + 
+  ylim(24, 45) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+  
+#thats cool! but its really pixelated
+
+##try mapping it with Krig
+##this will smooth it a little bit so its not so pixelated
+diploid_kgd_ho=krig_gd(diploid_wgd_ho, index = 1, grd = diploid_raster6, disagg_grd = 2)
+ggplot_gd(diploid_kgd_ho) +
+  ggtitle("Kriged Ho") +
+   xlim(-105, -70) + 
+  ylim(24, 45) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+```
+
+### Allelic Richness (Ar)
+```{r}
+###run windows with Ar
+diploid_wgd_ar=window_gd(ideal_vcf_ld, diploid_coords, diploid_raster6, stat = "allelic_richness", wdim = 3, fact = 3, rarify = TRUE, rarify_n = 2, rarify_nit = 5, L = 100)
+
+##plot it
+ggplot_gd(diploid_wgd_ar, bkg = map.polygon) +
+  ggtitle("Moving Window Ar") +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "cornflowerblue") +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-105, -70) + 
+  ylim(24, 45) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+  
+#thats cool! but its really pixelated
+
+##try mapping it with Krig
+##this will smooth it a little bit so its not so pixelated
+diploid_kgd_ar=krig_gd(diploid_wgd_ar, index = 1, grd = diploid_raster6, disagg_grd = 2)
+ggplot_gd(diploid_kgd_ar) +
+  ggtitle("Kriged Ar") +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "cornflowerblue") +
+  theme_bw() +
+  xlim(-105, -70) + 
+  ylim(24, 45) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+```
+
+```{r}
+####THIS CODE DOESNT GIVE MEANINGFUL RESULTS WOMP WOMP
+###run windows with HWE
+##so this is the proportion of sites not in HWE
+#diploid_wgd_hwe=window_gd(ideal_vcf_ld, diploid_coords, diploid_raster6, stat = "hwe", wdim = 3, fact = 3, rarify = TRUE, rarify_n = 2, rarify_nit = 5, L = 100)
+
+##plot it
+#ggplot_gd(diploid_wgd_hwe, bkg = map.polygon) +
+#  ggtitle("Moving Window out of HWE") +
+#  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "cornflowerblue") +
+#  theme_bw() +
+#  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+#  xlim(-105, -70) + 
+#  ylim(24, 45) +
+#  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+#  coord_equal()
+#ok so that is interesting... why is it just one value???
+```
+This is a really cool program. So we can see that there are pockets of high genetic diversity across the range, one in the western Midwest and one along the central east coast. The Texas trees seem to have low diversity.
+
+
+## Prep for BOTTLENECK
+So bottleneck requires some very specific formatting to work (and Windows95 but that's a whole different problem). I consulted Copilot and it recommended taking the genind object and converting it to format 2.
+
+Format 2 (as explained on the BOTTLENECK) website: "the line is completed with the number of copies of each allele."
+
+### All diploids
+```{r}
+bottleneck_df=genind2df(ideal_genind)
+
+# Step 1: Reshape to long format
+long_geno <- bottleneck_df %>%
+  mutate(ind = seq_len(nrow(.))) %>%
+  pivot_longer(-ind, names_to = "locus", values_to = "genotype") %>%
+  filter(!is.na(genotype))
+
+# Step 2: Filter valid genotypes (only two-digit strings like "00", "01", "11")
+valid_geno <- long_geno %>%
+  filter(grepl("^[01]{2}$", genotype))
+
+# Step 3: Split genotypes into alleles
+allele1 <- substr(valid_geno$genotype, 1, 1)
+allele2 <- substr(valid_geno$genotype, 2, 2)
+
+# Step 4: Stack alleles into one column
+allele_matrix <- data.frame(
+  locus = rep(valid_geno$locus, 2),
+  allele = c(allele1, allele2)
+)
+
+# Step 5: Count alleles using base R
+allele_counts <- as.data.frame(table(allele_matrix$locus, allele_matrix$allele))
+colnames(allele_counts) <- c("locus", "allele", "count")
+lines <- apply(allele_counts, 1, function(row) paste(row, collapse = " "))
+
+# Step 1: Split by locus
+locus_list <- split(allele_counts, allele_counts$locus)
+
+# Step 2: Build lines manually
+formatted_lines <- sapply(locus_list, function(df) {
+  k <- nrow(df)
+  counts <- paste(df$count, collapse = " ")
+  paste(df$locus[1], k, counts)
+})
+
+
+# Step 6: Format and export
+writeLines(c("diploids_all", formatted_lines), "bottleneck_input_alldiploids.txt")
+```
+
+
+###Post-DED
+```{r}
+bottleneck_df=genind2df(diploid_postDED_genind)
+
+# Step 1: Reshape to long format
+long_geno <- bottleneck_df %>%
+  mutate(ind = seq_len(nrow(.))) %>%
+  pivot_longer(-ind, names_to = "locus", values_to = "genotype") %>%
+  filter(!is.na(genotype))
+
+# Step 2: Filter valid genotypes (only two-digit strings like "00", "01", "11")
+valid_geno <- long_geno %>%
+  filter(grepl("^[01]{2}$", genotype))
+
+# Step 3: Split genotypes into alleles
+allele1 <- substr(valid_geno$genotype, 1, 1)
+allele2 <- substr(valid_geno$genotype, 2, 2)
+
+# Step 4: Stack alleles into one column
+allele_matrix <- data.frame(
+  locus = rep(valid_geno$locus, 2),
+  allele = c(allele1, allele2)
+)
+
+# Step 5: Count alleles using base R
+allele_counts <- as.data.frame(table(allele_matrix$locus, allele_matrix$allele))
+colnames(allele_counts) <- c("locus", "allele", "count")
+lines <- apply(allele_counts, 1, function(row) paste(row, collapse = " "))
+
+# Step 1: Split by locus
+locus_list <- split(allele_counts, allele_counts$locus)
+
+# Step 2: Build lines manually
+formatted_lines <- sapply(locus_list, function(df) {
+  k <- nrow(df)
+  counts <- paste(df$count, collapse = " ")
+  paste(df$locus[1], k, counts)
+})
+
+
+# Step 6: Format and export
+writeLines(c("diploids_postDED", formatted_lines), "bottleneck_input_postDEDdiploids.txt")
+```
+
+### Pre-DED
+```{r}
+bottleneck_df=genind2df(diploid_preDED_genind)
+
+# Step 1: Reshape to long format
+long_geno <- bottleneck_df %>%
+  mutate(ind = seq_len(nrow(.))) %>%
+  pivot_longer(-ind, names_to = "locus", values_to = "genotype") %>%
+  filter(!is.na(genotype))
+
+# Step 2: Filter valid genotypes (only two-digit strings like "00", "01", "11")
+valid_geno <- long_geno %>%
+  filter(grepl("^[01]{2}$", genotype))
+
+# Step 3: Split genotypes into alleles
+allele1 <- substr(valid_geno$genotype, 1, 1)
+allele2 <- substr(valid_geno$genotype, 2, 2)
+
+# Step 4: Stack alleles into one column
+allele_matrix <- data.frame(
+  locus = rep(valid_geno$locus, 2),
+  allele = c(allele1, allele2)
+)
+
+# Step 5: Count alleles using base R
+allele_counts <- as.data.frame(table(allele_matrix$locus, allele_matrix$allele))
+colnames(allele_counts) <- c("locus", "allele", "count")
+lines <- apply(allele_counts, 1, function(row) paste(row, collapse = " "))
+
+# Step 1: Split by locus
+locus_list <- split(allele_counts, allele_counts$locus)
+
+# Step 2: Build lines manually
+formatted_lines <- sapply(locus_list, function(df) {
+  k <- nrow(df)
+  counts <- paste(df$count, collapse = " ")
+  paste(df$locus[1], k, counts)
+})
+
+
+# Step 6: Format and export
+writeLines(c("diploids_preDED", formatted_lines), "bottleneck_input_preDEDdiploids.txt")
+```
+
+```{r, include=FALSE}
+# Step 1: Extract allele counts from genind
+allele_counts <- tab(ideal_genind, freq = FALSE, NA.method = "zero")
+
+# Step 2: Convert to long format and parse locus/allele
+allele_df <- as.data.frame(allele_counts) %>%
+  tibble::rownames_to_column("ind") %>%
+  pivot_longer(-ind, names_to = "locus_allele", values_to = "count") %>%
+  separate(locus_allele, into = c("locus", "allele"), sep = "\\.") %>%
+  group_by(locus, allele) %>%
+  summarise(count = sum(count), .groups = "drop")
+
+# Step 3: Reassemble each line manually
+format_lines <- allele_df %>%
+  group_by(locus) %>%
+  summarise(
+    k = n(),
+    counts = paste(count, collapse = " "),
+    .groups = "drop"
+  ) %>%
+  mutate(line = paste(locus, k, counts)) %>%
+  pull(line)
+
+# Step 4: Write to plain text file with title line
+writeLines(c("MyPopulation", format_lines), "bottleneck_input.txt")
+```
+
+# Making Figures
+## PCA and CV values
+```{r}
+(strict_pca_plot | ideal_pca_plot) / (lazy_pca_plot | lazy_np_pca_plot) / ideal_2n_CV_plot / diploid_tess_cv_plot
+```
+
+## WinGen
+```{r}
+###pi
+ggplot_gd(diploid_wgd_pi, bkg = map.polygon, col = custom_colors_diploid) +
+  #ggtitle("Moving Window Pi") +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "black", size = 0.85) +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()+
+  labs(x="", y="")
+
+###Ho
+ggplot_gd(diploid_wgd_ho, bkg = map.polygon, col = custom_colors_diploid) +
+  #ggtitle("Moving Window Ho") +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "black", size = 0.85) +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()+
+  labs(x="", y="")
+
+#Ar
+ggplot_gd(diploid_wgd_ar, bkg = map.polygon, col = custom_colors_diploid) +
+  #ggtitle("Moving Window Ar") +
+  geom_point(data = diploid_coords, aes(x=long, y=lat), pch = 16, col = "black", size = 0.85) +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()+
+  labs(x="", y="")
+```
