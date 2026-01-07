@@ -17,13 +17,20 @@ The scripts I used for this section are in a folder titled "part1_scripts".
 ![graphic of pipeline steps](images/2.png)
 
 ### Step 1b) Quality Control
-Of course, once I got sequence data back, I ran FastQC and MultiQC. This is just to make sure that sequencing was successful. The associated scripts for this are 1b_fastqc.sh and 1b_multiqc.sh.
+  Of course, once I got sequence data back, I ran FastQC and MultiQC. This is just to make sure that sequencing was successful. The associated scripts for this are 1b_fastqc.sh and 1b_multiqc.sh.
 ### Step 2b) Trimming
-This step removes the Illumina adapters used for sequencing. The associates scripts are 2b_trimmomatic.sh
+  This step removes the Illumina adapters used for sequencing. The associates scripts are 2b_trimmomatic.sh
 ### Step 3b) Alignment
-The associated script here is 3b_alignment.sh. This starts with adding the programs to the conda environment and indexing the genome. Then, 
+  The associated script here is 3b_alignment.sh. This starts with adding the programs to the conda environment and indexing the genome*. Then, it runs an alignment with BWA, converts the sam file to a bam file, sorts the bams, then generates a flagstat report for each individual. There are ways to consolidate all of the individual flagstat reports into one, but I usually just click through a few to make sure nothing failed too terribly. There is code included here to run PrimerClip, I didn't use this in the final version, but included it just in case. Primerclip only works if you have a primerfile and align to the reference fasta of gene regions, not the whole genome. So, I just didn't use it.
+  *a quick note about the genome: This is haplotype 2 of an assembled diploid *U. americana* genome on Phytozome [here](https://phytozome-next.jgi.doe.gov/info/Uamericanavar_NA87034HAP2_v1_1). Since this amplicon panel includes gene regions from *U. americana*, and a handful of disease genes (see my other github for more information), I ran a comparison to see if any of the disease genes were found in the genome. There was one gene region derived from Phytoplasma that was found in the genome, so I masked that and continued as normal.
+### Step 4b) SNP calling and filtering
+  Here is where we start venturing into the *statistically illegal* territory. At this point, we still don't know the ploidy of each individual, so we assume it is diploid. This is bad for a bunch of reasons I won't get into here. So, for the sake of determining cytotypes, we are going to assume everything is a diploid. Keep in mind, this whole pipeline took about two weeks to run to completion, so I highly recommend increasing the computational power. I did this a few different ways. First, you can increase the number of threads. Second, try increasing the heap that you use. I didn't see too much of a change in speed even when bumped up to 256gb. Finally, you can try using parallels. This will run multiple samples at the same time. Just be careful that you don't overextend your server because it'll crash (it only happened twice to me). 
+  The 4b_gatk_pt1.sh pipeline creates all the output folders that you need. First, it sorts the bams into the format needed for GATK. Then it marks duplicates and adds read groups. Finally it runs GATK HaplotypeCaller which outputs GVCFs for each individual. Then, I ran 4b_gatk_pt2.sh which combines the GVCFs into a cohort VCF and called SNPs with GATK GenotypeGVCFs. Finally, I ran three different levels of SNP filtering in 4b_snp_filter.sh. 
+### Step 5b) PCA to determine cytotypes
+Here, we use plink to prune for linkage then run the PCA in script 5b_PCA_pt1.sh. I download those files onto my laptop and run the next script 5b_PCA_pt2.Rmd (an R markdown) in Rstudio. It has code to graph the PCA, assign the cluster, and test the watershed hypothesis. Based on which PCA had the most individuals of known cytotypes, I was able to determine which cluster is for diploids and polyploids. There was another cluster that I called "other" and removed those individuals because they are likely other species. Then, I saved a csv file with the individuals in each cluster and exported that back to the server and separated the diploids into one folder, and polyploids into another. Congrats! Now the cytotypes are separate and each can be analyzed. This can be done with script 5b_PCA_pt3.sh, but make sure you convert the file to the proper format with dos2unix first! This will read the names of the files and move them into the correct folders based on the csv lists.
 
 ## Part 2) Analyze Diploids
+This part is easy compared to the polyploids.
 
 ## Part 3) Analyze Polyploids
 ![graphic of pipeline steps](images/3.png)
