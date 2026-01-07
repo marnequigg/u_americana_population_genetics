@@ -1,0 +1,398 @@
+---
+title: "assume_diploid_analysis_figures"
+author: "m quigg"
+date: "2025-07-25"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Let's go to the library
+These are all of the packages I needed for these figures.
+```{r, include=FALSE}
+library(adegenet)
+library(vcfR)
+library(tidyverse)
+library(pinfsc50)
+library(dplyr)
+library(poppr)
+library(pegas)
+library(PopGenReport)
+library(hierfstat)
+library(paletteer)
+library(patchwork)
+library(mapmixture)
+library(gridExtra)
+
+#set working directory
+setwd("C:/Users/mquig/Desktop/DED/Data_analysis/PCA_and_ADMIXTURE")
+```
+#PCA1: all samples
+I want to look at the genetic differentiation between the individuals and identify any strong clustering. I suspect there will be two clusters: diploids and tetraploids. I ran the PCA in terminal with the tutorial here: https://speciationgenomics.github.io/pca/
+```{r}
+###import the data###
+pca1=read_table("elm.eigenvec", col_names = FALSE)
+eigenval1=scan("elm.eigenval")
+
+###clean up the data###
+
+##remove a nuisance column (we dont need ind twice)
+pca1=pca1[,-1]
+##set ind
+names(pca1)[1]="ind"
+names(pca1)[2:ncol(pca1)]=paste0("PC", 1:(ncol(pca1)-1))
+#this 
+
+###add ploidy and species info###
+ploidy_species=read.csv("ploidy_species.csv", header = TRUE)
+str(ploidy_species)
+ploidy_species=ploidy_species %>% 
+  rename(ind=CBG.Sample.ID)
+pca1_ps=left_join(pca1, ploidy_species, by = "ind")
+pca1_ps=as_tibble(pca1_ps)
+##rename the ploidy values (2,3,4,5) to diploid, tetraploid, etc.
+pca1_ps$Ploidy[pca1_ps$Ploidy == 0] <- "unknown"
+pca1_ps$Ploidy[pca1_ps$Ploidy == 2] <- "diploid"
+pca1_ps$Ploidy[pca1_ps$Ploidy == 3] <- "triploid"
+pca1_ps$Ploidy[pca1_ps$Ploidy == 4] <- "tetraploid"
+pca1_ps$Ploidy[pca1_ps$Ploidy == 5] <- "pentaploid"
+pca1_ps$Ploidy <- factor(pca1_ps$Ploidy)
+
+
+####percentage variance explained (PVE)####
+pve1=data.frame(PC=1:20, pve=eigenval1/sum(eigenval1)*100)
+
+###graph it
+ggplot(pve1, aes(PC, pve)) +geom_bar(stat = "identity") +
+  ylab("Percentage variance explained") +
+  theme_classic()
+```
+```{r}
+###calculate the cumulative sum of the pve
+cumsum(pve1$pve)
+#so PC1,2,3 explain about 33.6% of the variance
+
+####plot the pca####
+##I want the colors of the points to correspond to ploidy, and the shape of the points to correspond to species
+pca_plot=ggplot(pca1_ps, aes(PC1, PC2, col = Ploidy, shape = Species))+
+  geom_point(size = 2) + 
+  scale_colour_manual(values = c("#ce4441", "#23469c", "#ffbb44", "#859b6c", "azure3")) + 
+  #coord_equal() + 
+  theme_bw() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(pve1$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(pve1$pve[2], 3), "%)"))
+pca_plot
+```
+So that is pretty interesting! 
+##Cluster Assignments
+We seem to have 3 pretty distinct clusters. Let's verify that...
+```{r}
+####cluster assignment####
+###run a clustering analysis###
+##use kmeans with 3 centers
+k3=kmeans(pca1_ps[, c("PC1", "PC2")], centers = 3)
+##add the cluster assignments to the pca1 dataframe
+pca1_ps$Cluster <- factor(k3$cluster)
+
+###now lets plot it!###
+cluster_plot=ggplot(pca1_ps, aes(PC1, PC2, col = Cluster, shape = Species)) + 
+  geom_point(size = 2) + 
+  scale_colour_manual(values = c("#ce4441", "#ffbb44", "#23469c")) + 
+  #coord_equal() + 
+  theme_classic() + 
+  xlab(paste0("PC1 (", signif(pve1$pve[1], 3), "%)")) + 
+  ylab(paste0("PC2 (", signif(pve1$pve[2], 3), "%)"))
+cluster_plot
+```
+As expected, we have 3 clusters. One note: every time you rerun kmeans, each cluster gets assigned a different number. Now, I wan to extract the individuals in each cluster into their own dataframes and export them for ADMIXTURE and to plot in arcGIS. 
+```{r}
+###make dataframes to extract each cluster to rerun admixture on
+cluster1_4n=pca1_ps %>% 
+  filter(Cluster=="1") %>% 
+  select(ind)
+cluster2_other=pca1_ps %>% 
+  filter(Cluster=="2") %>% 
+  select(ind)
+cluster3_2n=pca1_ps %>% 
+  filter(Cluster=="3") %>% 
+  select(ind)
+
+##export list for ADMIXTURE
+#write.csv(cluster1_4n, "C:/Users/mquig/Desktop/DED/Data analysis/PCA_and_ADMIXTURE/cluster_assignments/cluster1_4n.csv", row.names = FALSE)
+#write.csv(cluster2_other, "C:/Users/mquig/Desktop/DED/Data analysis/PCA_and_ADMIXTURE/cluster_assignments/cluster2_other.csv", row.names = FALSE)
+#write.csv(cluster3_2n, "C:/Users/mquig/Desktop/DED/Data analysis/PCA_and_ADMIXTURE/cluster_assignments/cluster3_2n.csv", row.names = FALSE)
+
+
+###make a csv so you can put it in arcGIS
+coords=read.csv("samples_and_coords.csv", header = FALSE)
+colnames(coords)=c("ind", "latitude", "longitude")
+pca_coords=left_join(pca1_ps, coords, by = "ind")
+cluster_assignments=pca_coords %>% 
+  select(ind, Ploidy, Species, Cluster, latitude, longitude)
+cluster_assignments$Cluster[cluster_assignments$Cluster == 1] <- "other cluster"
+cluster_assignments$Cluster[cluster_assignments$Cluster == 2] <- "diploid cluster"
+cluster_assignments$Cluster[cluster_assignments$Cluster == 3] <- "polyploid cluster"
+
+str(cluster_assignments)
+write.csv(cluster_assignments, "C:/Users/mquig/Desktop/DED/Data analysis/PCA_and_ADMIXTURE/cluster_assignments/cluster_assignments.csv", row.names = FALSE)
+```
+### Add years for mapping
+Ok so I want to make a map of each cluster and the year the sample was collected. Every time I rerun the cluster assignments, it renames the clusters. This is slightly a problem but I am going to proceed with the cluster assignment that I have now.
+```{r}
+###import years
+year=read.csv("samples_and_year.csv", header = T)
+
+###create a new dataframe
+##tetraploids
+tetraploid_mapping=left_join(cluster2_other, coords, by = "ind")
+tetraploid_mapping2=left_join(tetraploid_mapping, year, by = "ind")
+tetraploid_mapping2=tetraploid_mapping2 %>% 
+  filter(!is.na(longitude), !is.na(latitude))
+
+##diploids
+diploid_mapping=left_join(cluster3_2n, coords, by = "ind")
+diploid_mapping2=left_join(diploid_mapping, year, by = "ind")
+diploid_mapping2=diploid_mapping2 %>% 
+  filter(!is.na(longitude), !is.na(latitude))
+
+###make csv files
+write.csv(tetraploid_mapping2, "C:/Users/mquig/Desktop/DED/Data_analysis/PCA_and_ADMIXTURE/tetraploid_years.csv", row.names = FALSE)
+write.csv(diploid_mapping2, "C:/Users/mquig/Desktop/DED/Data_analysis/PCA_and_ADMIXTURE/diploid_years.csv", row.names = FALSE)
+```
+##Incorporate Geographic Locations
+Next, I want to run the diploid and polyploid clusters in separate graphs and add the color of the points to correspond to the geographic locations. Based on this pattern, we might see evidence of isolation by distance or panmixia.
+
+Start with building the color scheme based on the coordinates.
+```{r}
+###get the coords df###
+coords=read.csv("samples_and_coords.csv", header=FALSE)
+coords=coords %>% 
+  rename("ind"=V1, "lat"=V2, "long"=V3)
+###define the colors based on lat/long info###
+##normalize lat and long to assign colors##
+normalize <- function(x) {
+  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+coords$lat_norm <- normalize(coords$lat)
+coords$lon_norm <- normalize(coords$long)
+##build the color scheme##
+coords$rgb_color <- mapply(function(g, b) {
+  if (is.na(g) || is.na(b)) {
+    NA
+  } else {
+    rgb(red = 0, green = g, blue = b)
+  }
+}, coords$lat_norm, coords$lon_norm)
+```
+Next, I wan to make the PCA of just the diploid cluster.
+```{r}
+###import the data###
+diploid_eigenval=scan("diploid_cluster.eigenval")
+diploid_pca=read_table("diploid_cluster.eigenvec", col_names = FALSE)
+##reformat
+diploid_pca=diploid_pca[,-1]
+names(diploid_pca)[1]="ind"
+names(diploid_pca)[2:ncol(diploid_pca)]=paste0("PC", 1:(ncol(diploid_pca)-1))
+##determine best PC
+pve_2n=data.frame(PC=1:20, pve=diploid_eigenval/sum(diploid_eigenval)*100)
+ggplot(pve_2n, aes(x=PC, y=pve)) + geom_bar(stat = "identity")
+##clean up the dataframe
+merged_diploids=left_join(diploid_pca, coords, by = "ind")
+merged_diploids=merged_diploids %>% 
+  filter(!is.na(long), !is.na(lat))
+###plot it!###
+diploid_pca=ggplot(merged_diploids, aes(x = PC1, y = PC2, color = rgb_color)) +
+  geom_point(size = 2.5, alpha = 0.9, na.rm = TRUE) +
+  scale_color_identity() +
+  theme_classic() +
+  labs(title = "PCA of Diploids") +
+  xlab(paste0("PC1 (", signif(pve_2n$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(pve_2n$pve[2], 3), "%)")) +
+  theme(plot.title = element_text(hjust = 0.5))
+diploid_pca
+```
+Onwards to the polyploids!
+```{r}
+###import the data###
+polyploid_eigenval=scan("polyploid_cluster.eigenval")
+polyploid_pca=read_table("polyploid_cluster.eigenvec", col_names = FALSE)
+##reformat
+polyploid_pca=polyploid_pca[,-1]
+names(polyploid_pca)[1]="ind"
+names(polyploid_pca)[2:ncol(polyploid_pca)]=paste0("PC", 1:(ncol(polyploid_pca)-1))
+##determine best PC
+pve_4n=data.frame(PC=1:20, pve=polyploid_eigenval/sum(polyploid_eigenval)*100)
+##clean up the dataframe
+merged_polyploids=left_join(polyploid_pca, coords, by = "ind")
+merged_polyploids=merged_polyploids %>% 
+  filter(!is.na(long), !is.na(lat))
+
+##plot it!
+polyploid_pca=ggplot(merged_polyploids, aes(x = PC1, y = PC2, color = rgb_color)) +
+  geom_point(size = 2.5, alpha = 0.9, na.rm = TRUE) +
+  scale_color_identity() +
+  theme_classic() +
+  labs(
+    title = "PCA of Polyploids") +
+  xlab(paste0("PC1 (", signif(pve_4n$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(pve_4n$pve[2], 3), "%)")) +
+  theme(plot.title = element_text(hjust = 0.5))
+polyploid_pca
+```
+Now, let's combine the two and add a map to show where the points are.
+```{r}
+###make the legend###
+#Sample evenly spaced lat/long points across your dataset’s range
+legend_df <- expand.grid(
+  lat = seq(min(coords$lat, na.rm = TRUE), max(coords$lat, na.rm = TRUE), length.out = 5),
+  long = seq(min(coords$long, na.rm = TRUE), max(coords$long, na.rm = TRUE), length.out = 5)
+)
+
+# Normalize to get blended colors (same as your PCA plot logic)
+normalize <- function(x) {
+  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+
+legend_df$lat_norm <- normalize(legend_df$lat)
+legend_df$long_norm <- normalize(legend_df$long)
+legend_df$color <- rgb(0, legend_df$lat_norm, legend_df$long_norm)
+
+# Create the tile plot using actual lat/long values
+legend_plot <- ggplot(legend_df, aes(x = long, y = lat)) +
+  geom_tile(aes(fill = color)) +
+  scale_fill_identity() +
+  labs(
+    title = "Color Gradient by Latitude & Longitude",
+    x = "Longitude",
+    y = "Latitude"
+  )
+us_map <- map_data("state")
+map_legend=ggplot() +
+  geom_polygon(data = us_map, aes(x = long, y = lat, group = group),
+               fill = "white", color = "black") +
+  geom_point(data = coords, aes(x = long, y = lat, color = rgb_color), size = 1) +
+  scale_color_identity() +
+  coord_fixed(1.3) +
+  labs(title = "Sample Locations") +
+  theme_classic() +
+  ylab("Latitude") + xlab("Longitude") +
+  theme(plot.title = element_text(hjust = 0.5))
+map_legend
+
+
+(diploid_pca + polyploid_pca) / map_legend +plot_layout(heights = c(2,1))
+```
+
+#ADMIXTURE
+I took the lists of samples in each cluster and used either --keep or --remove to run admixture on them. I ran it with 2 to 20 potential populations. I used the same website tutorial that was included for PCA. To look at overall population structure, I got rid of the "other" cluster and only kept the diploid and polyploid clusters.
+
+##How many populations?
+To determine how many populations best fit the data, I extracted the cross-validation values from the admixture analysis then plotted them. We want to find the "elbow" and that is the best population fit.
+```{r}
+CV_c13_k20=read_table("cluster13_k20.cv.error", col_names = FALSE)
+###we have 10 replicates for each K valueS, so average them all
+CV_sum_c13_k20=CV_c13_k20 %>% 
+  group_by(X1) %>% 
+  summarize(n=length(X1),
+            mean=mean(X2),
+            sd=sd(X2),
+            se=sd/sqrt(n),
+            lower.CI=mean-(1.96*se),
+            upper.CI=mean+(1.96*se)) %>% 
+  rename(K="X1")
+###plot the cross validation scores
+c13_plot_k20=ggplot(CV_sum_c13_k20, aes(K, mean)) +
+  geom_point() +
+  #geom_smooth() +
+  theme_classic() +
+  ggtitle("CV of Diploid + Tetraploid Clusters")
+c13_plot_k20
+```
+The first "elbow" appears around K=9, and the second is around K=15. My hypothesis was K=12 because of the 12 watersheds.
+
+
+##Graph the ADMIXTURE results for the 12 watersheds
+For this, we need 2 files: the Q matrix and which watersheds the trees are in.
+
+First, I need the Q matrix from the ADMIXTURE output. Since I did 10 replicates of each K, I picked the one with the lowest CV. I downloaded the Q matrix from the server. 
+
+Second, we need to know which sample is in each watershed. To do this, I went into arcGIS and assigned each point to the appropriate watershed, then exported a csv file. 
+
+```{r}
+###import the watershed data###
+watersheds=read.csv("samples_and_watersheds.csv", header = TRUE)
+watersheds=watersheds %>% 
+  dplyr::select(Sample_ID, Latitude, Longitude, name)
+
+###import the qmatrix data###
+qmatrix=read.table("cluster1_3.12.1.Q")
+nrow(qmatrix)
+##add the sample IDs
+qmatrix_samples=read.table("cluster1_3.fam")$V2
+rownames(qmatrix)=qmatrix_samples
+admixture_df=cbind(Sample_ID=rownames(qmatrix), qmatrix)
+
+###merge the dataframes###
+admixture_df=merge(admixture_df, watersheds, by = "Sample_ID")
+
+###clean it up###
+##rename columns
+admixture_df <- admixture_df %>%
+  dplyr::rename(
+    SampleID  = Sample_ID,
+    Cluster1  = V1,
+    Cluster2  = V2,
+    Cluster3  = V3,
+    Cluster4  = V4,
+    Cluster5  = V5,
+    Cluster6  = V6,
+    Cluster7  = V7,
+    Cluster8  = V8,
+    Cluster9  = V9,
+    Cluster10 = V10,
+    Cluster11 = V11,
+    Cluster12 = V12,
+    Watershed = name)
+##remove any ind not in a watershed
+admixture_df=admixture_df %>% filter(!is.na(Watershed) & Watershed != "")
+
+
+###assign colors for the map###
+cluster_colors=c("#CE4441FF", "#EE8577FF", "#FFBB44FF", "#62929AFF", "#23469c", "#C969A1FF", "#EB7926FF", "#859B6CFF", "cornflowerblue", "#004F63FF", "#592688", "#9467bd")
+
+```
+Now I that the prep is done, I want to make the structure plot for the 12 watersheds and combine them into one big figure.
+```{r}
+###graph it###
+##reshape the data to long format
+admix_long=admixture_df %>%
+  pivot_longer(
+    cols = starts_with("Cluster"),
+    names_to = "Cluster",
+    values_to = "Proportion")
+##determine dominant cluster
+dominant_df=admix_long %>%
+  group_by(SampleID, Watershed) %>%
+  slice_max(order_by = Proportion, n = 1, with_ties = FALSE) %>%
+  dplyr::select(SampleID, Watershed, DominantCluster = Cluster, DominantProportion = Proportion)
+##merge the two dataframes
+admix_long=admix_long %>%
+  left_join(dominant_df, by = c("SampleID", "Watershed"))
+##reorder based on dominant cluster
+admix_long=admix_long %>%
+  mutate(SampleID = fct_reorder(SampleID, DominantProportion, .desc = TRUE))
+##time to graph it!
+ggplot(admix_long, aes(x = SampleID, y = Proportion, fill = Cluster)) +
+  geom_bar(stat = "identity", width = 0.9) +
+  facet_wrap(~ Watershed, ncol = 2, nrow = 6, scales = "free_x") +
+  scale_fill_manual(values = cluster_colors) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.spacing = unit(0.2, "lines"),
+    strip.text = element_text(size = 10),
+    legend.position = "right"
+  ) +
+  labs(y = "Proportion")
+```
+Great! She's gorgeous!
