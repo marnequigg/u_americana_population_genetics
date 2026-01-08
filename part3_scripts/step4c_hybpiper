@@ -1,0 +1,37 @@
+#path to reads: /data/labs/Fant/Quigg/03e.hybpiper/03.hybphaser1/05_phasing/phased_reads/diploid_sub_fastq_split
+#path to ref: /data/labs/Fant/Quigg/03e.hybpiper/04.hybpiper_pt2/diploid_sub/reference/diploid_sub_ref.fasta
+#first I want to rename the files
+cd /data/labs/Fant/Quigg/03e.hybpiper/03.hybphaser1/05_phasing/phased_reads/diploid_sub_fastq_split
+for f in *_to_DIP_R*.fastq; do mv "$f" "$(echo "$f" | sed -E 's/^([^_]+)_b[^_]+_to_DIP_R([12])\.fastq/\1_DIP_R\2.fastq/')"; done
+
+#now to start hybpiper
+conda deactivate
+conda activate hybpiper
+
+#I want to run 3 samples in parallel with 10 cores each
+cd /data/labs/Fant/Quigg/03e.hybpiper/04.hybpiper_pt2/diploid_sub
+
+#make the script to run it
+nano run_hybpiper_DIP.sh
+#!/bin/bash
+
+SAMPLE=$1
+TARGET="/data/labs/Fant/Quigg/03e.hybpiper/04.hybpiper_pt2/diploid_sub/reference/diploid_sub_ref.fasta"
+THREADS=10
+
+hybpiper assemble \
+  --prefix "$SAMPLE" \
+  -r "/data/labs/Fant/Quigg/03e.hybpiper/03.hybphaser1/05_phasing/phased_reads/diploid_sub_fastq_split/${SAMPLE}_R1.fastq" "/data/labs/Fant/Quigg/03e.hybpiper/03.hybphaser1/05_phasing/phased_reads/diploid_sub_fastq_split/${SAMPLE}_R2.fastq" \
+  -t_dna "$TARGET" \
+  --bwa \
+  --cpu "$THREADS"
+#exit
+chmod +x run_hybpiper_DIP.sh
+
+#create the sample list
+find /data/labs/Fant/Quigg/03e.hybpiper/03.hybphaser1/05_phasing/phased_reads/diploid_sub_fastq_split -name '*_DIP_R1.fastq' | sed -E 's|.*/([^/]+)_DIP_R1.fastq|\1_DIP|' > sample_list_DIP.txt
+
+#time to actually run it
+screen -S hybpiper_DIP
+conda activate hybpiper
+parallel -j 3 ./run_hybpiper_DIP.sh {} < sample_list_DIP.txt
