@@ -13,3 +13,11 @@ chmod +x assemble.sh
 
 #run it
 screen -L ./assemble.sh
+
+#run the stats once it's finshed
+hybpiper stats -t_dna /data/labs/Fant/Quigg/hybpiper/target_file3.fasta gene namefile.txt
+
+#generate a heatmap
+hybpiper recovery_heatmap seq_lengths.tsv
+
+#I moved all of the folders into a new directory
