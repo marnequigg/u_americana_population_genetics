@@ -1,0 +1,214 @@
+#create the gatk conda
+conda create -n gatk4 python=3.9
+conda install bioconda::gatk4 #version 4.3.0.0
+conda install bioconda::samtools #version 1.5
+conda install bioconda::picard #version 3.0.0
+#to fix that inevitable libcrypto error
+ln -s libcrypto.so.1.1 libcrypto.so.1.0.0
+
+###############################################################################################################################
+##### prep for GATK #####
+conda activate gatk4
+cd /data/labs/Fant/Quigg/04.SNP_calling/diploid_sub/00.bams_from_hybpiper
+nano gatk_prep_DIP.sh
+
+#!/bin/bash
+
+set -euo pipefail
+
+# Reference genome
+REF_GENOME="/data/labs/Fant/Quigg/04.SNP_calling/references/diploid_sub_ref.fasta"
+
+# Output base directory
+BASE_OUT="/data/labs/Fant/Quigg/04.SNP_calling/diploid_sub"
+SORTED_DIR="$BASE_OUT/01.sorted_bams"
+RG_DIR="$BASE_OUT/02.rg_bams"
+DEDUP_DIR="$BASE_OUT/03.deduplicated_bams"
+METRICS_DIR="$BASE_OUT/metrics"
+LOG_FILE="$BASE_OUT/pipeline.log"
+
+# Create subdirectories
+mkdir -p "$SORTED_DIR" "$RG_DIR" "$DEDUP_DIR" "$METRICS_DIR"
+
+process_sample() {
+  BAM="$1"
+  filename=$(basename "$BAM")
+  SAMPLE_ID="${filename%.bam}"
+
+  {
+    echo "🕒 $(date) — Starting $SAMPLE_ID"
+
+    # Step 0: Sort BAM
+    SORTED_BAM="$SORTED_DIR/${SAMPLE_ID}_sorted.bam"
+    if [[ ! -f "$SORTED_BAM" ]]; then
+      echo "🔄 Sorting $SAMPLE_ID..."
+      samtools sort -o "$SORTED_BAM" "$BAM" -@ 10
+      echo "✅ Sorted $SAMPLE_ID"
+    else
+      echo "⚠️ Sorted BAM exists for $SAMPLE_ID, skipping"
+    fi
+
+    # Step 1: Add Read Groups
+    RG_BAM="$RG_DIR/${SAMPLE_ID}_rg.bam"
+    if [[ ! -f "$RG_BAM" ]]; then
+      echo "🔄 Adding read groups to $SAMPLE_ID..."
+      picard -Xmx48G AddOrReplaceReadGroups \
+        I="$SORTED_BAM" \
+        O="$RG_BAM" \
+        RGID="$SAMPLE_ID" \
+        RGLB="lib1" \
+        RGPL="illumina" \
+        RGPU="unit1" \
+        RGSM="$SAMPLE_ID" \
+        VALIDATION_STRINGENCY=SILENT
+      echo "✅ Read groups added for $SAMPLE_ID"
+    else
+      echo "⚠️ RG BAM exists for $SAMPLE_ID, skipping"
+    fi
+
+    # Step 2: MarkDuplicates
+    MARKED_BAM="$DEDUP_DIR/${SAMPLE_ID}_marked.bam"
+    METRICS_FILE="$METRICS_DIR/${SAMPLE_ID}_dedup.metrics.txt"
+    if [[ ! -f "$MARKED_BAM" ]]; then
+      echo "🔄 Marking duplicates for $SAMPLE_ID..."
+      gatk --java-options "-Xmx48G" MarkDuplicates \
+        I="$RG_BAM" \
+        O="$MARKED_BAM" \
+        M="$METRICS_FILE" \
+        REMOVE_DUPLICATES=false \
+        VALIDATION_STRINGENCY=SILENT
+      echo "✅ Duplicates marked for $SAMPLE_ID"
+    else
+      echo "⚠️ Marked BAM exists for $SAMPLE_ID, skipping"
+    fi
+
+    # Step 3: Index BAM
+    if [[ -f "$MARKED_BAM" ]]; then
+      echo "🔄 Indexing $SAMPLE_ID..."
+      samtools index "$MARKED_BAM" -@ 10
+      echo "✅ Indexed $SAMPLE_ID"
+    else
+      echo "❌ Cannot index: $MARKED_BAM not found for $SAMPLE_ID"
+    fi
+
+    echo "🕒 $(date) — Finished $SAMPLE_ID"
+    echo "---------------------------------------------"
+  } >> "$LOG_FILE" 2>&1
+}
+
+export -f process_sample
+export REF_GENOME BASE_OUT SORTED_DIR RG_DIR DEDUP_DIR METRICS_DIR LOG_FILE
+
+# Run 2 samples at a time
+find . -maxdepth 1 -name "*.bam" | parallel -j 3 process_sample {}
+
+#exit
+
+chmod +x gatk_prep_DIP.sh
+screen -L ./gatk_prep_DIP.sh
+
+###############################################################################################################################
+##### call SNPs #####
+nano haplo_gatk_DIP.sh
+
+#!/bin/bash
+
+set -euo pipefail
+
+# Reference genome (adjust per subgenome if needed)
+REF_GENOME="/data/labs/Fant/Quigg/04.SNP_calling/references/diploid_sub_ref.fasta"
+
+# Input BAM directory
+BAM_DIR="/data/labs/Fant/Quigg/04.SNP_calling/diploid_sub/03.deduplicated_bams"
+GVCF_DIR="/data/labs/Fant/Quigg/04.SNP_calling/diploid_sub/04.gvcfs"
+LOG_FILE="/data/labs/Fant/Quigg/04.SNP_calling/diploid_sub/04.gvcfs/haplotypecaller.log"
+
+# Create output directory
+mkdir -p "$GVCF_DIR"
+
+run_haplotypecaller() {
+  BAM="$1"
+  filename=$(basename "$BAM")
+  SAMPLE_ID="${filename%.bam}"
+  GVCF="$GVCF_DIR/${SAMPLE_ID}.g.vcf.gz"
+
+  {
+    echo "🧬 $(date) — Starting HaplotypeCaller for $SAMPLE_ID"
+    gatk --java-options "-Xmx60G" HaplotypeCaller \
+      -R "$REF_GENOME" \
+      -I "$BAM" \
+      -O "$GVCF" \
+      -ERC GVCF \
+      --native-pair-hmm-threads 10
+    echo "✅ Finished $SAMPLE_ID"
+    echo "---------------------------------------------"
+  } >> "$LOG_FILE" 2>&1
+}
+
+export -f run_haplotypecaller
+export REF_GENOME GVCF_DIR LOG_FILE
+
+# Run in parallel (adjust -j for cores)
+find "$BAM_DIR" -name "*.bam" | parallel -j 3 run_haplotypecaller {}
+
+###############################################################################################################################
+##### combine VCFs #####
+nano gatk_DIP_pt2.sh
+
+#!/bin/bash
+set -euo pipefail
+
+# Define paths
+INPUT_DIR="/data/labs/Fant/Quigg/04.SNP_calling/diploid_sub/04.gvcfs"
+REFERENCE="/data/labs/Fant/Quigg/04.SNP_calling/references/diploid_sub_ref.fasta"
+COHORT_GVCF="${INPUT_DIR}/cohort_DIP.g.vcf.gz"
+FINAL_VCF="${INPUT_DIR}/final_DIP.vcf.gz"
+
+# Step 1: Combine GVCFs
+echo "🔗 Combining GVCFs from $INPUT_DIR..."
+
+GVCF_LIST=""
+for gvcf in "$INPUT_DIR"/*.g.vcf.gz; do
+  [[ "$gvcf" == "$COHORT_GVCF" || "$gvcf" == "$FINAL_VCF" ]] && continue
+  GVCF_LIST+=" --variant $gvcf"
+done
+
+gatk --java-options "-Xmx60g" CombineGVCFs \
+  -R "$REFERENCE" \
+  $GVCF_LIST \
+  -O "$COHORT_GVCF"
+
+echo "✅ GVCFs combined into: $COHORT_GVCF"
+
+# Step 2: Genotype GVCFs
+echo "🧬 Running GenotypeGVCFs..."
+
+gatk --java-options "-Xmx60g" GenotypeGVCFs \
+  -R "$REFERENCE" \
+  -V "$COHORT_GVCF" \
+  -O "$FINAL_VCF"
+
+echo "✅ Final VCF saved to: $FINAL_VCF"
+#exit
+chmod +x gatk_DIP_pt2.sh
+screen -L ./gatk_DIP_pt2.sh
+
+###############################################################################################################################
+##### filter VCFs #####
+cd /data/labs/Fant/Quigg/04.SNP_calling/diploid_sub/05.vcfs
+#trial 1: strict - ideal scenario according to Brenden
+vcftools --gzvcf final_DIP.vcf.gz --remove-indels --maf 0.05 --max-missing 0.50 --minQ 30 --min-meanDP 5 --max-meanDP 40 --minDP 10 --maxDP 40 --recode --recode-INFO-all --out final_strict_DIP
+#kept 466/466 individuals
+#kept 391/4331
+
+#trial 2: Brenden's parameters
+vcftools --gzvcf final_DIP.vcf.gz --remove-indels --maf 0.05 --max-missing 0.50 --minQ 30 --min-meanDP 5 --max-meanDP 80 --minDP 5 --maxDP 80 --recode --recode-INFO-all --out final_lazy_DIP
+#kept 466/466 individuals
+#kept 571/4331
+
+#based on the vcf results
+vcftools --gzvcf final_DIP.vcf.gz --remove-indels --maf 0.1 --max-missing 0.80 --minQ 30 --min-meanDP 5 --max-meanDP 40 --minDP 5 --maxDP 40 --recode --recode-INFO-all --out final_ideal_DIP
+#this only kept 202 sites
+
+###############################################################################################################################
+#download the vcf file and move to Rstudio
