@@ -1,0 +1,1428 @@
+---
+title: "tetraploid_analysis"
+author: "m quigg"
+date: "2025-10-09"
+output: word_document
+---
+
+# Tetraploid Analysis
+
+So to get here was a long journey. I ended up phasing the reads to their respective subgenomes (diploid and U. glabra) and calling SNPs on each individual subgenome. By doing it this way, they are all technically diploid. So, we can analyze them as if they are diploids. At this point, I did not do anything for linkage disequilibrium.
+
+This is not the "normal" way of analyzing data. Jeremie thinks this will be a great technique to share, since it seems to have worked. YAY!
+
+# Prep the Data: combine the VCFs
+
+To get started, I need to combine the VCFs from the two subgenomes. Like with the diploids, I have 3 levels of VCF filtering 'strictness' so each needs to be combined. The two subgenomes (DIP=diploid subgenome, UG=U. glabra subgenome) are in individual files.
+
+```{r, include=FALSE}
+####lets get in started####
+setwd("C:/Users/mquig/Desktop/DED/Data_analysis/tetraploid_phased")
+
+####go to the library####
+library(adegenet)
+library(vcfR)
+library(tidyverse)
+library(pinfsc50)
+#library(dplyr)
+library(poppr)
+library(pegas)
+library(PopGenReport)
+library(hierfstat)
+library(paletteer)
+library(patchwork)
+library(mapmixture)
+library(gridExtra)
+library(geodist)
+library(vegan)
+library(tinytex)
+#library(algatr)
+library(maps)
+library(tess3r)
+library(rworldmap)
+library(wingen)
+library(terra)
+library(raster)
+library(viridis)
+library(sf)
+library(dartR)
+library(fields)
+library(rworldxtra)
+
+#create custom color palette
+custom_colors_tetra=c("#CE4441FF", "#EE8577FF", "#FFBB44FF", "#62929AFF", "#23469c")
+```
+
+## 'Ideal' VCF Filtering
+```{r, include=FALSE, return=FALSE}
+###import the VCFs###
+ideal_DIP=read.vcfR("ideal_DIP.vcf")
+ideal_UG=read.vcfR("ideal_UG.vcf")
+
+###convert to geninds###
+ideal_DIP_genind=vcfR2genind(ideal_DIP)
+ideal_UG_genind=vcfR2genind(ideal_UG)
+
+###convert to dataframes###
+ideal_DIP_df=genind2df(ideal_DIP_genind)
+ideal_UG_df=genind2df(ideal_UG_genind)
+
+###combine them!###
+##convert rownames to columns
+ideal_DIP_df$sample=rownames(ideal_DIP_df)
+ideal_DIP_df=ideal_DIP_df %>% 
+  separate(sample, into = c("sampleID", "delete"), sep = "_") %>% 
+  dplyr::select(-delete)
+ideal_UG_df$sample=rownames(ideal_UG_df)
+ideal_UG_df=ideal_UG_df %>% 
+  separate(sample, into = c("sampleID", "delete"), sep = "_") %>% 
+  dplyr::select(-delete)
+
+##join the dataframes
+ideal_df=left_join(ideal_DIP_df, ideal_UG_df, by = "sampleID")
+rownames(ideal_df)=ideal_df$sampleID
+ideal_df=ideal_df %>% 
+  dplyr::select(-sampleID)
+
+##convert back to genind
+ideal_genind=df2genind(ideal_df, ncode = 2)
+
+ideal_df_freq=apply(ideal_df, 2, function(x) {
+  x[x == "00"] <- 0  # A/A
+  x[x == "01"] <- 1  # A/B
+  x[x == "10"] <- 1  # B/A
+  x[x == "11"] <- 2  # B/B
+  as.numeric(x)
+})
+rownames(ideal_df_freq)=rownames(ideal_df)
+ideal_genlight <- new("genlight", ideal_df_freq)
+ideal_genlight <- gl.compliance.check(ideal_genlight)
+#gl2vcf(ideal_genlight, outfile = "ideal_output.vcf", plink_path = "\"C:/Program Files/plink\"")
+#this will work, I just need to download plink
+```
+
+## 'Strict' VCF Filtering
+```{r, include=FALSE}
+###import the VCFs###
+strict_DIP=read.vcfR("strict_DIP.vcf")
+strict_UG=read.vcfR("strict_UG.vcf")
+
+###convert to geninds###
+strict_DIP_genind=vcfR2genind(strict_DIP)
+strict_UG_genind=vcfR2genind(strict_UG)
+
+###convert to dataframes###
+strict_DIP_df=genind2df(strict_DIP_genind)
+strict_UG_df=genind2df(strict_UG_genind)
+
+###combine them!###
+##convert rownames to columns
+strict_DIP_df$sample=rownames(strict_DIP_df)
+strict_DIP_df=strict_DIP_df %>% 
+  separate(sample, into = c("sampleID", "delete"), sep = "_") %>% 
+  dplyr::select(-delete)
+strict_UG_df$sample=rownames(strict_UG_df)
+strict_UG_df=strict_UG_df %>% 
+  separate(sample, into = c("sampleID", "delete"), sep = "_") %>% 
+  dplyr::select(-delete)
+
+##join the dataframes
+strict_df=left_join(strict_DIP_df, strict_UG_df, by = "sampleID")
+rownames(strict_df)=strict_df$sampleID
+strict_df=strict_df %>% 
+  dplyr::select(-sampleID)
+
+##convert back to genind
+strict_genind=df2genind(strict_df, ncode = 2)
+
+strict_df_freq=apply(strict_df, 2, function(x) {
+  x[x == "00"] <- 0  # A/A
+  x[x == "01"] <- 1  # A/B
+  x[x == "10"] <- 1  # B/A
+  x[x == "11"] <- 2  # B/B
+  as.numeric(x)
+})
+strict_genlight <- new("genlight", strict_df_freq)
+strict_genlight <- gl.compliance.check(strict_genlight)
+#gl2vcf(strict_genlight, outfile = "strict_output.vcf")
+```
+
+## 'Lazy' VCF Filtering
+```{r, include=FALSE}
+###import the VCFs###
+lazy_DIP=read.vcfR("lazy_DIP.vcf")
+lazy_UG=read.vcfR("lazy_UG.vcf")
+
+###convert to geninds###
+lazy_DIP_genind=vcfR2genind(lazy_DIP)
+lazy_UG_genind=vcfR2genind(lazy_UG)
+
+###convert to dataframes###
+lazy_DIP_df=genind2df(lazy_DIP_genind)
+lazy_UG_df=genind2df(lazy_UG_genind)
+
+###combine them!###
+##convert rownames to columns
+lazy_DIP_df$sample=rownames(lazy_DIP_df)
+lazy_DIP_df=lazy_DIP_df %>% 
+  separate(sample, into = c("sampleID", "delete"), sep = "_") %>% 
+  dplyr::select(-delete)
+lazy_UG_df$sample=rownames(lazy_UG_df)
+lazy_UG_df=lazy_UG_df %>% 
+  separate(sample, into = c("sampleID", "delete"), sep = "_") %>% 
+  dplyr::select(-delete)
+
+##join the dataframes
+lazy_df=left_join(lazy_DIP_df, lazy_UG_df, by = "sampleID")
+rownames(lazy_df)=lazy_df$sampleID
+lazy_df=lazy_df %>% 
+  dplyr::select(-sampleID)
+
+##convert back to genind
+lazy_genind=df2genind(lazy_df, ncode = 2)
+
+lazy_df_freq=apply(lazy_df, 2, function(x) {
+  x[x == "00"] <- 0  # A/A
+  x[x == "01"] <- 1  # A/B
+  x[x == "10"] <- 1  # B/A
+  x[x == "11"] <- 2  # B/B
+  as.numeric(x)
+})
+lazy_genlight <- new("genlight", lazy_df_freq)
+lazy_genlight <- gl.compliance.check(lazy_genlight)
+#gl2vcf(lazy_genlight, outfile = "lazy_output.vcf")
+```
+
+## Impute data
+```{r, include=FALSE}
+###calculate genetic similarity
+library(proxy)
+
+##compute pairwise distances (ignoring NAs)
+tetra_geno_dist=dist(ideal_df_freq, method = "euclidean")
+tetra_geno_dist_matrix=as.matrix(tetra_geno_dist)
+
+###impute using k nearest neighbor
+##make a function for mode
+get_mode <- function(v) {
+  v <- v[!is.na(v)]
+  if (length(v) == 0) return(NA)
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+##make the function
+impute_knn <- function(genotype_matrix, dist_matrix, k = 5) {
+  imputed <- genotype_matrix
+  for (i in 1:nrow(genotype_matrix)) {
+    missing_loci <- which(is.na(genotype_matrix[i, ]))
+    if (length(missing_loci) > 0) {
+      neighbors <- order(dist_matrix[i, ], decreasing = FALSE)[2:(k + 1)]
+      for (locus in missing_loci) {
+        neighbor_values <- genotype_matrix[neighbors, locus]
+        mode_val <- get_mode(neighbor_values)
+        if (!is.na(mode_val)) {
+          imputed[i, locus] <- mode_val
+        }
+      }
+    }
+  }
+  rownames(imputed) <- rownames(genotype_matrix)
+  return(imputed)
+}
+
+##generate the output
+tetra_impute=impute_knn(ideal_df_freq, tetra_geno_dist_matrix, k=5)
+head(tetra_impute)
+
+##double check
+sum(is.na(tetra_impute))
+#22 left
+
+##remove the columns with missing data
+tetra_impute_filtered <- tetra_impute[, colSums(is.na(tetra_impute)) == 0]
+rownames(tetra_impute_filtered)=rownames(tetra_impute)
+#that removed all of the columns with missing data
+
+##check again
+sum(is.na(tetra_impute_filtered))
+#YAY 0 NAs left
+
+###convert back to genind
+##convert back to alleles
+tetra_impute_filtered_df=as.data.frame(tetra_impute_filtered)
+geno_freq=as.data.frame(lapply(tetra_impute_filtered_df, function(x) {
+  x <- as.character(x)
+  x[x == "00"] <- "0"
+  x[x == "01"] <- "1"
+  x[x == "11"] <- "2"
+  return(x)
+}))
+
+rownames(geno_freq)=rownames(tetra_impute_filtered_df)
+colnames(geno_freq) <- paste0("Locus", seq_len(ncol(geno_freq)))
+
+tetra_impute_genind=df2genind(geno_freq, sep = "", ncode = 1, ploidy = 2, ind.names = rownames(geno_freq))
+
+###convert to a vcf###
+#ideal_genlight <- new("genlight", geno_freq)
+#ploidy(ideal_genlight) <- 2
+#ideal_genlight <- gl.compliance.check(ideal_genlight)
+#gl2vcf(ideal_genlight, outfile = "C:/Users/mquig/Desktop/DED/Data_analysis/tetraploid_phased/ideal_output.vcf", plink_path = "\"C:/Program Files/plink\"")
+#file.copy(
+#  from = file.path(tempdir(), "ideal_output.vcf.vcf"),
+#  to = "C:/Users/mquig/Desktop/DED/Data_analysis/tetraploid_phased/ideal_output.vcf"
+#)
+ideal_combined_vcf=read.vcfR("ideal_output.vcf")
+#yay it worked!
+```
+
+# Population Assignments
+
+##PCA
+```{r}
+###import the data###
+ideal_pca=read_table("combined_PCA.eigenvec", col_names = FALSE)
+ideal_eigenval=scan("combined_PCA.eigenval")
+
+###clean up the data###
+##remove extra ind column
+ideal_pca=ideal_pca[,-1]
+
+##rename the columns##
+names(ideal_pca)[1]="ind"
+names(ideal_pca)[2:ncol(ideal_pca)]=paste0("PC", 1:(ncol(ideal_pca)-1))
+
+###calculate percetage variance explained (PVE)###
+##calculate it##
+ideal_pve=data.frame(PC=1:20, pve=ideal_eigenval/sum(ideal_eigenval)*100)
+
+##graph it##
+ggplot(ideal_pve, aes(PC, pve)) +geom_bar(stat = "identity") +
+  ylab("Percentage variance explained") +
+  theme_classic()
+#the first one is just over 7.5
+
+##calculate the cumulative sum of the pve##
+cumsum(ideal_pve$pve)
+#so PV 1,2,3 only account for 23% of the data
+
+
+###graph the PCA###
+ideal_pca_plot=ggplot(ideal_pca, aes(PC1, PC2))+
+  geom_point(size = 2) + 
+  #coord_equal() + 
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(ideal_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(ideal_pve$pve[2], 3), "%)")) +
+  labs(title = "Phased Tetraploids")
+ideal_pca_plot
+```
+
+##ADMIXTURE
+Using ADMIXTURE is another way to identify population structure. I ran the ADMIXTURE analysis on the server and tested 1-40 populations (K= 1:40) with 10 replicates per K. Using the average cross-validation scores (CV), the number of populations can be identified. If there is an obvious "elbow" in the graph of the CV scores, then that is the appropriate number of populations based on this model.
+
+The diploids show no evidence of population structure, but based on the results of TESS (I did this out of order), I suspect we have ~18 populations.
+
+I used the ideal VCF filtering scenario that was combined and converted back into a VCF to run ADMIXTURE.
+```{r}
+###import data###
+CV_ideal_tetra=read_table("combined.cv.error", col_names = FALSE)
+
+
+###we have 10 replicates for each K value, so average them all###
+CV_ideal_tetra_summary=CV_ideal_tetra %>% 
+  group_by(X1) %>% 
+  summarize(n=length(X1),
+            mean=mean(X2),
+            sd=sd(X2),
+            se=sd/sqrt(n),
+            lower.CI=mean-(1.96*se),
+            upper.CI=mean+(1.96*se)) %>% 
+  rename(K="X1")
+
+###plot all of the CV scores
+ideal_tetra_allCV_plot=ggplot(CV_ideal_tetra, aes(X1, X2)) +
+  geom_point() +
+  geom_smooth(color = "forestgreen", fill = "forestgreen", linewidth = 0.5, method = "loess", alpha = 0.3) +
+  theme_classic() +
+  ggtitle("All Cross-Validation Scores from ADMIXTURE (K= 1-40)") +
+  labs(x ="Number of Populations (K)", y="Cross-Validation Score")
+ideal_tetra_allCV_plot
+
+###plot the mean cross validation scores###
+ideal_tetra_CV_plot=ggplot(CV_ideal_tetra_summary, aes(K, mean)) +
+  geom_point() +
+  #geom_smooth() +
+  theme_classic() +
+  ggtitle("Mean Cross-Validation Scores from ADMIXTURE (K= 1-40)")
+ideal_tetra_CV_plot
+```
+
+# Genetic Diversity
+So, like with the diploids, I want to continue by using the 'ideal' VCF filtering scenario to calculate genetic diversity. This is where my tetraploid workaround gets a little iffy. Calculating HWE is going to be messy (well the calculation will be easy). The messy part comes from the assumptions. I'm going to need to write this up very clearly in the discussion section because there are probably some extra assumptions. 
+
+I used the code from the diploid R markdown, so the same tutorials and all that jazz.
+
+## Prep
+Most of these require a genind object, so need to convert to the 00, 01, 11 format then into a genind.
+```{r}
+tetra_impute_filtered_alleles <- apply(tetra_impute_filtered, 2, function(x) {
+  x[x == "0"] <- "00"  # A/A
+  x[x == "1"] <- "10"  # A/B
+  x[x == "2"] <- "11"  # B/B
+  return(x)
+})
+
+rownames(tetra_impute_filtered_alleles)=rownames(tetra_impute_filtered)
+
+##convert to genind
+#colnames(geno_char) <- paste0("Locus", seq_len(ncol(geno_char)))
+
+tetra_impute_genind=df2genind(tetra_impute_filtered_alleles, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(tetra_impute_filtered_alleles))
+tetra_impute_genind@pop=factor(rep("Pop1", nInd(tetra_impute_genind)))
+```
+
+## All polyploid samples (before + after DED)
+Here I am going to run all of the tetraploid samples, so both from before and after DED to get an understanding of all genetic diversity. I am going to use the hierfstat package for most of this. This package uses the WRONG MATH for Fst, so we're going to ignore that part.
+```{r}
+tetra_stats=basic.stats(tetra_impute_genind, diploid = TRUE, digits = 4)
+tetra_stats$overall
+```
+Interesting! Without He, it's hard to draw conclusions about Ho, but Fis is really low! There seems to be a lot of outcrossing going on here. *it looks like Hs=He
+
+### Heterozygosity
+So, in the package hierfstat, Hs is the same as He. But, I want to try a few other techniques to determine if the values hierfstat::basic.stats() gives us are accurate. 
+```{r, include=FALSE}
+##convert to hierfstat
+tetra_impute_hier=genind2hierfstat(tetra_impute_genind)
+
+###calculate diversity metrics with adegenet
+tetra_div=adegenet::summary(tetra_impute_genind)
+tetra_div
+names(tetra_div)
+```
+
+#### Observed Heterozygosity
+```{r}
+###average Ho
+mean(tetra_div$Hobs)
+#0.540089
+
+###graph it
+plot(tetra_div$Hobs, xlab= "Loci", ylab= "Observed Heterozygosity", main= "Observed Heterozygosity per Locus")
+```
+So, hierfstat calculated Ho to be 0.5401, but adegenet gave us 0.540089, which is the same thing!
+
+### Expected Heterozygosity
+```{r}
+###average He
+mean(tetra_div$Hexp)
+#0.2982526
+
+###plot Ho and He for each loci
+plot(tetra_div$Hobs,tetra_div$Hexp, xlab="Hobs", ylab="Hexp", 
+     main="He as a function of Ho per locus")
+```
+Weird looking graph. If He=Hs in hierfstat, then the value is 0.3649 which is very close to adegenet's calculation of He which is 0.3646955.
+
+### Observed = Expected???
+Now to test if Ho = He. 
+```{r}
+###test if the variances are the same
+bartlett.test(list(tetra_div$Hexp, tetra_div$Hobs))
+#the variances are not equal (p<0.05), so need to do a Welch's t-test and take into account the variances
+
+###Welch's t-test
+het_tetra_ttest=t.test(tetra_div$Hexp, tetra_div$Hobs, var.equal = FALSE)
+het_tetra_ttest
+```
+Well lookee here, there is a difference between observed and expected heterozygosity! Because our p-value is so low we can reject our null hypothesis (Ho=He). We need to dive deeper and see if it's out of HWE. We might be able to conclude something about a recent bottleneck, but we would need to confirm that by running BOTTLENECK.
+
+### Hardy-Weinberg Equilibrium
+Sooooo, how many loci in HWE? We already know that we violate a bunch of the assumptions for HWE, but it can be informative nonetheless.
+```{r, include=FALSE}
+###run the test
+tetra_HWE=hw.test(tetra_impute_genind, B = 1000)
+tetra_HWE=as.data.frame(tetra_HWE)
+
+###count how many loci are in and out of HWE
+alpha=0.05
+
+##out of HWE
+tetra_out_HWE=sum(tetra_HWE$Pr.exact < alpha)
+tetra_out_HWE
+#261
+
+##in HWE
+tetra_in_HWE=sum(tetra_HWE$Pr.exact >= alpha)
+tetra_in_HWE
+#9
+```
+Well there are 261 loci out of HWE and 9 loci in HWE. This can fluctuate a little since there are only 1000 bootstraps.
+
+### Fis by Gene
+Jeremie is suspicious of how low Fis is. It doesn't make sense biologically because trees can't purposely outcross. He suggested looking at each gene to see if there are any in particular that might be driving it. 
+```{r}
+###extract the Fis values
+all_tetra_Fis=as.data.frame(tetra_stats$Fis)
+
+###make the loci column from the rowname
+all_tetra_Fis$loci=rownames(all_tetra_Fis)
+
+###data moving and shaking
+##rename the Fis row and get rid of extra columns
+all_tetra_Fis=all_tetra_Fis %>% 
+  dplyr::rename(Fis="1") %>% 
+  dplyr::select(-dumpop)
+##separate the columns
+all_tetra_Fis=all_tetra_Fis %>% 
+  tidyr::separate(loci, into = c("subgenome", "gene", "site"), sep = "_")
+##separate again and delete the extra column
+all_tetra_Fis2=all_tetra_Fis %>% 
+  tidyr::separate(gene, into = c("del", "gene")) %>% 
+  dplyr::select(-del)
+
+###calculate the fis per gene
+fis_gene=all_tetra_Fis2 %>% 
+  group_by(gene) %>% 
+  dplyr::summarize(n=length(Fis), 
+                   mean=mean(Fis), 
+                   sd=sd(Fis), 
+                   se=sd/sqrt(n), 
+                   lower.CI=mean-(1.96*se), 
+                   upper.CI=mean+(1.96*se))
+
+###graph it!!!
+ggplot(fis_gene, aes(x=gene, y=mean, ymin=lower.CI, ymax=upper.CI, color=gene)) + 
+  geom_point(size=2.5) + 
+  geom_errorbar(width=0.5, size=0.75) +
+  theme_classic() + 
+  xlab("Gene") + ylab("Average Fis Value") + 
+  theme(legend.position = "upright", axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+```
+It doesn't seem like any one gene in particular is driving the really low Fis values. Could it have something to do with the individual-based sampling scheme? 
+
+
+## Compare before and after DED 
+So, our cutoff for before/after DED is 1975. This is more or less an arbitrary number based on the spread of DED. Technically, before/after DED is different for each region, but doing it that way is way too complicated because I would need to dig through historical records.
+```{r, include=FALSE}
+###import samples and the year they were collected
+year=read.csv("samples_and_year.csv", header = T)
+
+###make a list of samples from after DED
+postDED_list=year %>% 
+  filter(year >= 1975) %>% 
+  mutate(DED= "postDED")
+
+###make a list of samples from before DED
+preDED_list=year %>% 
+  filter(year < 1975) %>% 
+  mutate(DED= "preDED")
+
+###big dataframe
+DED_list=merge(preDED_list, postDED_list, all = T)
+
+
+###filter SNP data into before/after DED
+##we need to make the row names of the SNP data into a column
+tetra_impute_filtered_df$ind=rownames(tetra_impute_filtered_df)
+
+##add pre/post DED
+tetra_impute_DED=right_join(DED_list, tetra_impute_filtered_df, by = "ind")
+##maintain row names
+rownames(tetra_impute_DED)=rownames(tetra_impute_filtered_df)
+##remove unnecessary columns
+tetra_impute_DED=tetra_impute_DED %>% dplyr::select(-ind, -year)
+##covert back to alleles
+tetra_impute_DED=as.data.frame(lapply(tetra_impute_DED, function(x) {
+  x <- as.character(x)
+  x[x == "0"] <- "00"
+  x[x == "1"] <- "01"
+  x[x == "2"] <- "11"
+  return(x)
+}))
+rownames(tetra_impute_DED)=rownames(tetra_impute_filtered_df)
+
+###create dataframes for pre/post DED
+##preDED
+preDED_tetra=tetra_impute_DED %>% 
+  filter(DED=="preDED") %>% 
+  dplyr::select(-DED)
+#146 indiciduals
+
+##postDED
+postDED_tetra=tetra_impute_DED %>% 
+  filter(DED=="postDED") %>% 
+  dplyr::select(-DED)
+#319 individuals
+
+###convert to geninds
+##preDED
+colnames(preDED_tetra) <- paste0("Locus", seq_len(ncol(preDED_tetra)))
+tetra_preDED_genind=df2genind(preDED_tetra, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(preDED_tetra))
+
+##post DED
+colnames(postDED_tetra) <- paste0("Locus", seq_len(ncol(postDED_tetra)))
+tetra_postDED_genind=df2genind(postDED_tetra, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(postDED_tetra))
+##add dummy populations so it'll calculate div stats
+tetra_preDED_genind@pop=factor(rep("preDED", nInd(tetra_preDED_genind)))
+tetra_postDED_genind@pop=factor(rep("postDED", nInd(tetra_postDED_genind)))
+
+
+##make one big genind that treats pre/postDED as populations
+##extract the "populations"
+DED_vector=tetra_impute_DED$DED
+tetra_impute_DED=tetra_impute_DED %>% dplyr::select(-DED)
+
+##covert to genind
+colnames(tetra_impute_DED) <- paste0("Locus", seq_len(ncol(tetra_impute_DED)))
+tetra_DED_genind=df2genind(tetra_impute_DED, sep = "", ncode = 2, ploidy = 2, ind.names = rownames(tetra_impute_DED), pop = as.factor(DED_vector))
+
+##verify it worked
+genind2df(tetra_DED_genind)
+
+###create a merged genind
+tetra_DED_genind=adegenet::repool(tetra_preDED_genind, tetra_postDED_genind)
+```
+
+So, for this part, I want to use the genind that had pre/postDED as populations.
+```{r}
+preDED_stats=basic.stats(tetra_preDED_genind, diploid = TRUE, digits = 4)
+preDED_stats$overall
+postDED_stats=basic.stats(tetra_postDED_genind, diploid = TRUE, digits = 4)
+postDED_stats$overall
+
+DED_stats=basic.stats(tetra_DED_genind, diploid = TRUE, digits = 4)
+DED_stats$overall
+
+DED_sum=adegenet::summary(tetra_DED_genind)
+#DED_sum
+```
+
+### Allelic Richness
+```{r}
+###calculate allelic richness
+##use popgenreport
+popgenreport(tetra_DED_genind, mk.allel.rich=TRUE, mk.pdf=FALSE)
+
+##use adegenet
+DED_sum=adegenet::summary(tetra_DED_genind)
+DED_sum
+
+###check for private alleles
+private_alleles(tetra_DED_genind, level = "population", count.alleles = TRUE)
+```
+Ok so in both pre and post DED there are 540 alleles and no private alleles. I think this might have something to do with how I imputed data using the nearest neighbor technique. BUT if I were to run it on the geninds with missing data, then the postDED group would have a higher allelic richness because the more recent samples have less missing data.
+
+### Ho and Fis
+
+```{r}
+preDED_div=basic.stats(tetra_preDED_genind)
+preDED_div$overall
+
+postDED_div=basic.stats(tetra_postDED_genind)
+postDED_div$overall
+```
+Before DED, Fis was -0.4526 and Ho was 0.5088. After DED, Fis -0.4955 and observed Ho is 0.5545.
+
+#### Ho: T-test and graph
+In order to prove that observed heterozygosity did not change before and after DED, you need to run a t-test.
+
+For this one, we are going to use the results from basic.stats which has Ho per locus.
+```{r}
+###make a data frame of the Ho values for before and after DED
+##preDED
+preDED_ho_locus=preDED_div$Ho
+preDED_ho_locus=as.data.frame(preDED_ho_locus)
+preDED_ho_locus=preDED_ho_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(preDED="1")
+##postDED
+postDED_ho_locus=postDED_div$Ho
+postDED_ho_locus=as.data.frame(postDED_ho_locus)
+postDED_ho_locus=postDED_ho_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(postDED="1")
+
+###run the t-test
+tetra_ho_ttest=t.test(preDED_ho_locus$preDED, postDED_ho_locus$postDED, paired = TRUE)
+tetra_ho_ttest
+
+###extract the p-values
+Ho_pvalue=tetra_ho_ttest$p.value
+```
+The p-value is 1.135732e-23, so there is a significant different between Ho before and after DED. It actually increased!
+
+#### Fis: T-test and graph
+In order to prove that Fis did not change before and after DED, you need to run a t-test.
+
+For this one, we are going to use the results from basic.stats which has Fis per locus. I'm basically going to use the same code as above just with Fis.
+```{r}
+###make a data frame of the Fis values for before and after DED
+##preDED
+preDED_Fis_locus=preDED_div$Fis
+preDED_Fis_locus=as.data.frame(preDED_Fis_locus)
+preDED_Fis_locus=preDED_Fis_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(preDED="1")
+##postDED
+postDED_Fis_locus=postDED_div$Fis
+postDED_Fis_locus=as.data.frame(postDED_Fis_locus)
+postDED_Fis_locus=postDED_Fis_locus %>% dplyr::select(-dumpop) %>% dplyr::rename(postDED="1")
+
+###run the t-test
+tetra_Fis_ttest=t.test(preDED_Fis_locus$preDED, postDED_Fis_locus$postDED, paired = TRUE)
+tetra_Fis_ttest
+
+###extract the p-values
+Fis_pvalue=tetra_Fis_ttest$p.value
+```
+Well just like with the Ho, there is a significant difference between before or after DED in regards to Fis. Both times there is an increase after DED.
+
+#### Graph the lack of difference
+For presentations and publications, I want to visually display these results.
+```{r}
+###combine to make Ho and Fis dataframes
+##make the ind column
+preDED_ho_locus$loci=rownames(preDED_ho_locus)
+postDED_ho_locus$loci=rownames(postDED_ho_locus)
+preDED_Fis_locus$loci=rownames(preDED_Fis_locus)
+postDED_Fis_locus$loci=rownames(postDED_Fis_locus)
+##combine them
+tetra_Ho_results=left_join(preDED_ho_locus, postDED_ho_locus, by = "loci")
+tetra_Fis_results=left_join(preDED_Fis_locus, postDED_Fis_locus, by = "loci")
+##handle the rownames
+rownames(tetra_Ho_results) <- tetra_Ho_results$loci
+rownames(tetra_Fis_results) <- tetra_Fis_results$loci
+
+###covert to long format
+tetra_ho_long <- tetra_Ho_results %>%
+  pivot_longer(cols = c(preDED, postDED), names_to = "DED", values_to = "Ho")
+tetra_fis_long <- tetra_Fis_results %>%
+  pivot_longer(cols = c(preDED, postDED), names_to = "DED", values_to = "Fis")
+
+###graph it
+ho_graph=ggplot(tetra_ho_long, aes(x = DED, y = Ho, fill = DED)) +
+  geom_boxplot(show.legend = FALSE, width = 0.3, fill = c("seagreen", "seagreen2")) +
+  geom_jitter(width = 0.05, alpha = 0.8, show.legend = FALSE, color = "cornflowerblue") +
+  labs(title = "Observed Heterozygosity (Ho) per Locus", x = "", y = "Observed Heterozygosity (Ho)", subtitle = "p-value=1.136e-23") +
+  theme_classic()
+
+fis_graph=ggplot(tetra_fis_long, aes(x = DED, y = Fis, fill = DED)) +
+  geom_boxplot(show.legend = FALSE, width = 0.3, fill = c("seagreen", "seagreen2")) +
+  geom_jitter(width = 0.05, alpha = 0.8, show.legend = FALSE, color = "cornflowerblue") +
+  labs(title = "Inbreeding Coefficient (Fis) per Locus", x = "", y = "Inbreeding (Fis)", subtitle = "p-value=8.376e-26") +
+  theme_classic()
+
+ho_graph | fis_graph
+```
+Ok now I'm confused. The t-tests say there is a difference, but the graph is saying otherwise. 
+
+### AMOVA
+Alrighty, let's do an AMOVA (analysis of molecular variance) to compare before and after DED. The main package to do this is poppr and it has two options ade4 and pegas. I want to do the ade4.
+
+We need to add the "populations" as strata. I included the year and pre and post DED as the population hierarchy but only ran the pre/post.
+```{r}
+###identify any NAs
+table(DED_list$DED, useNA = "ifany")
+
+##who is the NA?
+DED_list[is.na(DED_list$DED), ]
+#its NEBC02
+
+##get all individual names except NEBC02
+keep_inds=setdiff(indNames(tetra_DED_genind), "NEBC02")
+
+##subset the genind object
+tetra_DED_genind_clean=tetra_DED_genind[keep_inds, ]
+
+###add the pre and post DED list as strata
+##get the samples we have in tetras
+##extract the ind names from the genind
+tetra_DED_samples <- indNames(tetra_DED_genind_clean)
+tetra_DED_samples=as.data.frame(tetra_DED_samples)
+names(tetra_DED_samples)[1]="ind"
+
+##add the DED data
+DED_list_tetra=left_join(tetra_DED_samples, DED_list, by = "ind")
+  
+##add as strata
+strata(tetra_DED_genind_clean)=DED_list_tetra[-1]
+
+###AMOVA
+amova_ade4=poppr.amova(tetra_DED_genind_clean, hier = ~DED, method = "ade4", within = FALSE)
+amova_ade4
+```
+So most of the variation is within the "populations" not between them. There is a small difference between them, but it doesn't look biologically meaningful. Only ~1% of the variance is between populations and ~99% is within the populations. This might have something to do with the landscape playing a role rather than the impact of DED.
+
+
+# Landscape Genetics
+Now we can start the fun stuff! There isn't any obvious population structure based on the ADMIXTURE results, so this will be interesting. Some of the goals here are to identify any evidence of IBB (TESS) or IBD (Mantel tests), and areas of high genetic diversity.
+
+## Prep
+```{r, include=FALSE}
+###make coordinate dataframe
+coords=read.csv("samples_and_coords.csv", header = F)
+coords=coords %>% 
+  dplyr::rename(ind="V1", lat= "V2", long="V3") %>% 
+  relocate(long, .before = lat)
+
+##make rownames a column so you can join
+tetra_impute_filtered_df$ind=rownames(tetra_impute_filtered_df)
+tetra_impute_filtered_df$ind
+
+##can only have individuals with coords
+tetra_coords=right_join(coords, tetra_impute_filtered_df, by = "ind")
+tetra_coords=tetra_coords %>% 
+  drop_na() %>% 
+  arrange(ind)
+#now I have a dataframe with the ind, coords, no NAs, and SNP info
+
+##extract the coords into a data frame
+tetra_with_coords=data.frame(ind=tetra_coords$ind, long=tetra_coords$long, lat=tetra_coords$lat)
+##convert the ind column into rownames
+rownames(tetra_with_coords) <- tetra_coords$ind
+##remove the ind column
+tetra_with_coords=tetra_with_coords %>% dplyr::select(-ind)
+
+
+###convert to genind
+##get rid of lat and long
+tetra_coords_land=tetra_coords %>% dplyr::select(-lat, -long)
+##convert ind column to rownames
+rownames(tetra_coords_land) <- tetra_coords_land$ind
+##remove ind column
+tetra_coords_land=tetra_coords_land %>% dplyr::select(-ind)
+##convert to genind
+tetra_land_genind=df2genind(tetra_coords_land, sep = "", ncode = 1, ploidy = 2, ind.names=rownames(tetra_coords_land))
+
+##add dummy pop
+tetra_land_genind@pop=factor(rep("pop1", nInd(tetra_land_genind)))
+```
+
+## Testing Watershed Hypothesis
+### PCA with watershed clusters
+One thing Jeremie mentioned is testing to see if there is any association with the watersheds and the clustering (that doesn't exist). So I want to remake this PCA but have the colors of the dots associated with the watersheds to see if there is any clustering of the colors, even if it is not obvious with the black and white version.
+```{r}
+###import the watershed information
+watersheds=read.csv("samples_and_watersheds.csv", header = T)
+
+###clean up that very messy dataframe
+watersheds=watersheds %>% 
+  dplyr::select(Sample_ID, huc2, name) %>% 
+  dplyr::rename(ind=Sample_ID, watersheds=name)
+
+###fix up the PCA dataframe
+ideal_pca=ideal_pca %>% 
+  tidyr::separate(ind, into = c("pop", "ind"), sep = "_")
+
+###join the dataframes
+ideal_pca_watersheds=left_join(ideal_pca, watersheds, by = "ind")
+
+###graph it!!!
+ggplot(ideal_pca_watersheds, aes(PC1, PC2, color = watersheds)) +
+  geom_point(size = 3) + 
+  #coord_equal() + 
+  scale_color_manual(values = c("grey", "#CE4441FF", "#EE8577FF", "#FFBB44FF", "#62929AFF", "#23469c", "#C969A1FF", "#EB7926FF", "#859B6CFF", "cornflowerblue", "#004F63FF", "#592688", "black", "cornflowerblue", "#9467bd")) +
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(ideal_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(ideal_pve$pve[2], 3), "%)")) +
+  labs(title = "Ideal PCA with Watersheds")
+
+```
+### Admixture by Watershed
+```{r}
+###import the qmatrix data###
+qmatrix=read.table("combined.12.1.Q")
+nrow(qmatrix)
+##add the sample IDs
+qmatrix_samples=read.table("combined.fam")$V2
+rownames(qmatrix)=qmatrix_samples
+admixture_df=cbind(Sample_ID=rownames(qmatrix), qmatrix)
+
+##fix the admixture df
+admixture_df=admixture_df %>% 
+  separate(Sample_ID, into = c("del", "ind"), sep = "_") %>% 
+  dplyr::select(-del)
+  
+
+###merge the dataframes###
+admixture_df=merge(admixture_df, watersheds, by = "ind")
+
+###clean it up###
+##rename columns
+admixture_df <- admixture_df %>%
+  dplyr::rename(
+    SampleID  = ind,
+    Cluster1  = V1,
+    Cluster2  = V2,
+    Cluster3  = V3,
+    Cluster4  = V4,
+    Cluster5  = V5,
+    Cluster6  = V6,
+    Cluster7  = V7,
+    Cluster8  = V8,
+    Cluster9  = V9,
+    Cluster10 = V10,
+    Cluster11 = V11,
+    Cluster12 = V12,
+    Watershed = watersheds)
+##remove any ind not in a watershed
+admixture_df=admixture_df %>% filter(!is.na(Watershed) & Watershed != "")
+
+
+###assign colors for the map###
+cluster_colors=c("#CE4441FF", "#EE8577FF", "#FFBB44FF", "#62929AFF", "#23469c", "#C969A1FF", "#EB7926FF", "#859B6CFF", "cornflowerblue", "#004F63FF", "#592688", "#9467bd")
+cluster2_colors=c("#CE4441FF", "#c77974", "#EE8577FF", "#f2bbb1", "#FFBB44FF", "#f2ce86", "#62929AFF", "#a2b7bc", "#23469c", "#7883b9","#592688", "#9467bd" )
+
+```
+Now I that the prep is done, I want to make the structure plot for the 12 watersheds and combine them into one big figure.
+```{r}
+###graph it###
+##reshape the data to long format
+admix_long=admixture_df %>%
+  pivot_longer(
+    cols = starts_with("Cluster"),
+    names_to = "Cluster",
+    values_to = "Proportion")
+##determine dominant cluster
+dominant_df=admix_long %>%
+  group_by(SampleID, Watershed) %>%
+  slice_max(order_by = Proportion, n = 1, with_ties = FALSE) %>%
+  dplyr::select(SampleID, Watershed, DominantCluster = Cluster, DominantProportion = Proportion)
+##merge the two dataframes
+admix_long=admix_long %>%
+  left_join(dominant_df, by = c("SampleID", "Watershed"))
+##reorder based on dominant cluster
+admix_long=admix_long %>%
+  mutate(SampleID = fct_reorder(SampleID, DominantProportion, .desc = TRUE))
+##time to graph it!
+ggplot(admix_long, aes(x = SampleID, y = Proportion, fill = Cluster)) +
+  geom_bar(stat = "identity", width = 0.9) +
+  facet_wrap(~ Watershed, ncol = 2, nrow = 6, scales = "free_x") +
+  scale_fill_manual(values = cluster2_colors) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.spacing = unit(0.2, "lines"),
+    strip.text = element_text(size = 10),
+    legend.position = "right"
+  ) +
+  labs(y = "Proportion")
+```
+
+## Isolation by Barrier
+### TESS
+This is supposed to show us population boundaries. Based on Admixture, there is no population structure. This uses a slightly different approach to calculating populations clustering, but ultimatly they should agree.
+```{r}
+###convert coords to matrix
+tetra_coords_matrix=as.matrix(tetra_coords)
+
+###make a map!!!
+plot(tetra_with_coords, pch = 19, cex = 0.5, xlab = "Longitude", ylab = "Latitude")
+map(add = T, interior = F)
+#OMG IT WORKED
+
+###make the TESS object
+tetra_tess=tess3r::tess3(X = tetra_coords_land, coord = as.matrix(tetra_with_coords), K = 1:40, method = "projected.ls", ploidy = 2, openMP.core.num = 10)
+
+###plot the cross validation scores
+tetra_tess_cv_plot=plot(tetra_tess, pch = 19, col = "black", xlab = "Number of Ancestral Pops", ylab = "Cross-Validation Score", main = "Cross-Validation Scores from TESS")
+tetra_tess_cv_plot
+#so it looks like we have 18 pops!
+
+###Ancestry matrix
+##make the color palette
+colors18=c("#f44336", "#e81e63", "#9c27b0", "#673ab7", "#3f51b5", "#2196f3", "#03a9f4", "#00bcd4", "#009688", "#4caf50", "#8bc34a", "#cddc39", "#ffeb3b", "#ffc107", "#ff9800", "#ff5722", "#ffffff", "#000000")
+my.palette <- CreatePalette(colors18, 3)
+col.palette=CreatePalette(colors18, 18)
+
+##extract the matrix
+qmatrix18=qmatrix(tetra_tess, K = 18)
+
+###make a barplot (structure plot)
+bp <- barplot(qmatrix18, border = NA, space = 0, 
+              xlab = "Individuals", ylab = "Ancestry Proportions", 
+              main = "Ancestry Matrix", col = colors18)
+
+# Sort individuals by population or ancestry order
+sorted_indices <- bp$order
+sorted_q <- qmatrix18[sorted_indices, ]
+
+# Plot sorted individuals
+bp_pos <- barplot(t(sorted_q), border = NA, space = 0,
+                  xlab = "Individuals", ylab = "Ancestry Proportions",
+                  main = "Ancestry Matrix", col = colors18)
+
+# Add axis labels
+axis(1, at = bp_pos, labels = sorted_indices, las = 3, cex.axis = 0.4)
+
+###map
+plot(qmatrix18, as.matrix(tetra_with_coords), asp = 1, method = "map.max", interpol = FieldsKrigModel(10), 
+      main = "Ancestry Coefficients (K=18)",
+     xlab = "Longitude", ylab = "Latitude", 
+     resolution= c(300,300), cex = 0.4, 
+     xlim = c(-115, -65), ylim = c(25, 51),
+     col.palette=col.palette)
+
+##try again with ggplot
+map.polygon <- getMap(resolution = "high")
+ggtess3Q(qmatrix18, as.matrix(tetra_with_coords), map.polygon = map.polygon, col.palette = col.palette) +
+  #scale_fill_manual(values = colors18) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  xlim(-115, -65) + 
+  ylim(24, 51) + 
+  coord_equal() + 
+  geom_point(data = tetra_with_coords, aes(x = long, y = lat), size = 1) + 
+  xlab("Longitude") +
+  ylab("Latitude") + 
+  labs(title="Ancestry Coefficient (K=18)") +
+  theme_bw()
+```
+Ok so this run is showing us some population structure. Each time is slightly different. The population structure varies from about 15-19 populations being the most probable. The graph also looks different each time. A lot of the times it only has 2 or 3 colors. This one is really nice with lots of pretty colors. Basically, the northwestern part of the range is one obvious population and Florida has it's own population (rip Ulmus floridana). Overall, the model isn't great at fitting this data.
+
+#### TESS but with the watershed hypothesis
+So I want to run TESS but with 12 populations (12 watersheds) to see if there are any patterns.
+```{r}
+##extract the matrix
+qmatrix12=qmatrix(tetra_tess, K = 12)
+
+###make a barplot (structure plot)
+bp <- barplot(qmatrix12, border = NA, space = 0, 
+              xlab = "Individuals", ylab = "Ancestry Proportions", 
+              main = "Ancestry Matrix (12 pops)", col = colors18)
+
+# Sort individuals by population or ancestry order
+sorted_indices <- bp$order
+sorted_q <- qmatrix12[sorted_indices, ]
+
+# Plot sorted individuals
+bp_pos <- barplot(t(sorted_q), border = NA, space = 0,
+                  xlab = "Individuals", ylab = "Ancestry Proportions",
+                  main = "Ancestry Matrix", col = colors18)
+
+# Add axis labels
+axis(1, at = bp_pos, labels = sorted_indices, las = 3, cex.axis = 0.4)
+
+###map
+plot(qmatrix12, as.matrix(tetra_with_coords), asp = 1, method = "map.max", interpol = FieldsKrigModel(10), 
+      main = "Ancestry Coefficients (K=12)",
+     xlab = "Longitude", ylab = "Latitude", 
+     resolution= c(300,300), cex = 0.4, 
+     xlim = c(-115, -65), ylim = c(25, 51),
+     col.palette=col.palette)
+
+##try again with ggplot
+map.polygon <- getMap(resolution = "high")
+ggtess3Q(qmatrix12, as.matrix(tetra_with_coords), map.polygon = map.polygon, col.palette = col.palette) +
+  #scale_fill_manual(values = colors18) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  xlim(-115, -65) + 
+  ylim(24, 51) + 
+  coord_equal() + 
+  geom_point(data = tetra_with_coords, aes(x = long, y = lat), size = 1) + 
+  xlab("Longitude") +
+  ylab("Latitude") + 
+  labs(title="Ancestry Coefficient (K=12)") +
+  theme_bw()
+```
+
+## Isolation by Distance 
+### Mantel Tests
+Here we are testing for spatial autocorrelation, i.e. to see if "near things are more closely related than far things." So, we are looking to see if there is a relationship between genetic distance and geographic distance. Since it doesn't seem like we have any strong evidence of population structure (therefore no evidence of IBB), it would be a good idea to test for IBD. Since it is a wind pollinated species, IBD makes sense, but there was no evidence of it in the diploids. Womp womp. Let's check for it anyways.
+
+This is the tutorial: https://bcm-uga.github.io/TESS3_encho_sen/articles/main-vignette.html
+Interpretation: https://uw.pressbooks.pub/appliedmultivariatestatistics/chapter/mantel-test/
+```{r}
+###calculate geographic distance
+##create geographic distance matrix
+tetra_geodist_matrix=geodist(tetra_with_coords, measure = "Haversine")
+#head(tetra_geodist_matrix)
+
+###calculate genetic distance
+##I read a paper comparing different metrics for this, and Euclidean does not account for pop structure or ploidy
+##use the dist.genepop function in adegenet
+tetra_gendist_matrix=dist(tab(tetra_land_genind, freq = TRUE, NA.method = "mean"))
+#hist(tetra_gendist_matrix)
+#looks more or less normal lol
+
+###mantel tests: vegan###
+##run the mantel test
+tetra_mantel_vegan_spearman=mantel(tetra_geodist_matrix, tetra_gendist_matrix, method = "spearman", permutations = 999)
+tetra_mantel_vegan_spearman
+
+tetra_mantel_vegan_pearson=mantel(tetra_geodist_matrix, tetra_gendist_matrix, method = "pearson", permutations = 999)
+tetra_mantel_vegan_pearson
+
+###mantel tests: ade4###
+###I want to try another one to corroborate the results
+##I need two dist objects
+tetra_geodist_matrix2=dist(tetra_geodist_matrix)
+mantel.rtest(tetra_geodist_matrix2, tetra_gendist_matrix, nrepet = 999)
+#still very low
+```
+So, no, there is no relationship between genetic distance and geographic distance. That is disappointing.
+
+#### Visualize the Mantel Test
+```{r}
+###extract the lower triangle of the matrix, excluding the diagonal
+geo_vec <- as.vector(tetra_geodist_matrix[lower.tri(tetra_geodist_matrix)])
+gen_vec <- as.vector(tetra_gendist_matrix[lower.tri(tetra_gendist_matrix)])
+
+###create a dataframe of these two vectors
+mantel_df <- data.frame(
+  Geographic_Distance = geo_vec,
+  Genetic_Distance = gen_vec)
+
+###graph it!
+ggplot(mantel_df, aes(x = Geographic_Distance, y = Genetic_Distance)) +
+  geom_point(alpha = 0.3, color = "#ee8577", size = 1) +
+  geom_smooth(method = "lm", color = "#23469c", fill = "#23469c", se = TRUE) +
+  labs(
+    title = "Isolation by Distance in American Elm",
+    subtitle = "Mantel Test: Genetic vs Geographic Distance",
+    x = "Geographic Distance (km)",
+    y = "Genetic Distance (Euclidean)") +
+  theme_classic()
+```
+
+## Areas for Conservation Focus (places that have high genetic diversity)
+### WinGen
+So one thing Charlie requested is to know where there are areas of high genetic diversity that would be good for targeting for conservation and to source seed from. I found the R package wingen that will generate a raster map with sliding windows and visualize the areas of high diversity. Let's try it out!
+
+We need 4 files: genetic data (vcf without impute data), coordinates (diploid_coords), raster layer (can create it), and range (outlining the range/maybe a map of the US?).
+```{r}
+###fix vcf: remove individuals without coords
+##make dataframe of individuals we want to keep
+keep_wingen=rownames(tetra_with_coords)
+keep_wingen=as.data.frame(keep_wingen)
+keep_wingen=keep_wingen %>% 
+  dplyr::rename(ind=keep_wingen)
+
+###identify which columns to keep
+##Get sample names from VCF
+vcf_samples=colnames(ideal_combined_vcf@gt)[-1]  # remove "FORMAT" column
+##Extract just the sampleID part from VCF names
+vcf_ids_clean <- sub(".*_", "", vcf_samples)
+##Find matching full names
+matched_samples <- vcf_samples[vcf_ids_clean %in% keep_wingen$ind]
+##subset the vcf
+tetra_vcf_subset <- ideal_combined_vcf[, c("FORMAT", matched_samples)]
+##make sure it worked
+tetra_vcf_subset
+
+###create a raster
+##there are a few things we can change here:
+##buffer= adds to edge of raster
+##res= resolution
+##agg and disagg
+tetra_raster1=coords_to_raster(tetra_with_coords, buffer = 1, plot = TRUE)
+preview_gd(tetra_raster1, tetra_with_coords, method = "window", wdim = 3, fact = 3, sample_count = TRUE, min_n = 2)
+tetra_raster2=coords_to_raster(tetra_with_coords, buffer = 1, agg = 2, plot = TRUE)
+preview_gd(tetra_raster2, tetra_with_coords, method = "window", wdim = 3, fact = 3, sample_count = TRUE, min_n = 2)
+tetra_raster3=coords_to_raster(tetra_with_coords, buffer = 1, disagg = 4, plot = TRUE)
+preview_gd(tetra_raster3, tetra_with_coords, method = "window", wdim = 3, fact = 3, sample_count = TRUE, min_n = 2)
+tetra_raster4=coords_to_raster(tetra_with_coords, buffer = 1, res = 10, plot = TRUE)
+preview_gd(tetra_raster4, tetra_with_coords, method = "window", wdim = 3, fact = 3, sample_count = TRUE, min_n = 2)
+tetra_raster5=coords_to_raster(tetra_with_coords, buffer = 4, agg = 2, res = 1, plot = TRUE)
+preview_gd(tetra_raster4, tetra_with_coords, method = "window", wdim = 3, fact = 3, sample_count = TRUE, min_n = 2)
+tetra_raster6=coords_to_raster(tetra_with_coords, buffer = 4, disagg = 4, agg = 2, res = 1, plot = TRUE)
+preview_gd(tetra_raster6, tetra_with_coords, method = "window", wdim = 3, fact = 3, sample_count = TRUE, min_n = 2)
+#So there are many different ways to do this, and we should experiment later on with the different raster layers
+```
+
+#### Nucleotide Diversity (pi)
+```{r}
+###run windows with pi
+tetra_wgd_pi=window_gd(tetra_vcf_subset, tetra_with_coords, tetra_raster6, stat = "pi", wdim = 3, fact = 3, rarify = TRUE, rarify_n = 2, rarify_nit = 5, L = 100)
+
+##create custom color palette
+custom_colors_tetra=c("#CE4441FF", "#EE8577FF", "#FFBB44FF", "#62929AFF", "#23469c")
+
+##plot it
+ggplot_gd(tetra_wgd_pi, bkg = map.polygon, col = custom_colors_tetra) +
+  ggtitle("Moving Window Pi") +
+  geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black") +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+  
+#thats cool! but its really pixelated
+
+##try mapping it with Krig
+##this will smooth it a little bit so its not so pixelated
+tetra_kgd_pi=krig_gd(tetra_wgd_pi, index = 1, grd = tetra_raster6, disagg_grd = 2)
+ggplot_gd(tetra_kgd_pi, col = custom_colors_tetra) +
+  ggtitle("Kriged pi") +
+    geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black") +
+  theme_bw() +
+   xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+
+##mask the krig
+tetra_mgd_pi=mask_gd(tetra_kgd_pi, map.polygon)
+ggplot_gd(tetra_mgd_pi, col = custom_colors_tetra) +
+  ggtitle("Kriged & masked pi") +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_point(data = tetra_coords, aes(x=long, y=lat), pch = 16, col = "black") +
+  theme_bw() +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+```
+
+#### Observed Heterozygosity (Ho)
+```{r}
+###run windows with Ho
+tetra_wgd_ho=window_gd(tetra_vcf_subset, tetra_with_coords, tetra_raster6, stat = "Ho", wdim = 3, fact = 3, rarify = TRUE, rarify_n = 2, rarify_nit = 5, L = 100)
+
+##plot it
+ggplot_gd(tetra_wgd_ho, bkg = map.polygon, col = custom_colors_tetra) +
+  ggtitle("Moving Window Ho") +
+  geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black") +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+  
+#thats cool! but its really pixelated
+
+##try mapping it with Krig
+##this will smooth it a little bit so its not so pixelated
+tetra_kgd_ho=krig_gd(tetra_wgd_ho, index = 1, grd = tetra_raster6, disagg_grd = 2)
+ggplot_gd(tetra_kgd_ho, col = custom_colors_tetra) +
+  ggtitle("Kriged Ho") +
+   xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+```
+
+#### Allelic Richness (Ar)
+```{r}
+###run windows with Ar
+tetra_wgd_ar=window_gd(tetra_vcf_subset, tetra_with_coords, tetra_raster6, stat = "allelic_richness", wdim = 3, fact = 3, rarify = TRUE, rarify_n = 2, rarify_nit = 5, L = 100)
+
+##plot it
+ggplot_gd(tetra_wgd_ar, bkg = map.polygon, col = custom_colors_tetra) +
+  ggtitle("Moving Window Ar") +
+  geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black") +
+  theme_bw() +
+  #geom_polygon(data = us_map_df, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+  
+#thats cool! but its really pixelated
+
+##try mapping it with Krig
+##this will smooth it a little bit so its not so pixelated
+tetra_kgd_ar=krig_gd(tetra_wgd_ar, index = 1, grd = tetra_raster6, disagg_grd = 2)
+ggplot_gd(tetra_kgd_ar, col = custom_colors_tetra) +
+  ggtitle("Kriged Ar") +
+  geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black") +
+  theme_bw() +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal()
+```
+
+## Prep for BOTTLENECK
+So bottleneck requires some very specific formatting to work (and Windows95 but that's a whole different problem). I consulted Copilot and it recommended taking the genind object and converting it to format 2.
+
+Format 2 (as explained on the BOTTLENECK) website: "the line is completed with the number of copies of each allele."
+```{r, include=FALSE}
+bottleneck_df=genind2df(ideal_genind)
+
+# Step 1: Reshape to long format
+long_geno <- bottleneck_df %>%
+  mutate(ind = seq_len(nrow(.))) %>%
+  pivot_longer(-ind, names_to = "locus", values_to = "genotype") %>%
+  filter(!is.na(genotype))
+
+# Step 2: Filter valid genotypes (only two-digit strings like "00", "01", "11")
+valid_geno <- long_geno %>%
+  filter(grepl("^[01]{2}$", genotype))
+
+# Step 3: Split genotypes into alleles
+allele1 <- substr(valid_geno$genotype, 1, 1)
+allele2 <- substr(valid_geno$genotype, 2, 2)
+
+# Step 4: Stack alleles into one column
+allele_matrix <- data.frame(
+  locus = rep(valid_geno$locus, 2),
+  allele = c(allele1, allele2)
+)
+
+# Step 5: Count alleles using base R
+allele_counts <- as.data.frame(table(allele_matrix$locus, allele_matrix$allele))
+colnames(allele_counts) <- c("locus", "allele", "count")
+lines <- apply(allele_counts, 1, function(row) paste(row, collapse = " "))
+
+# Step 1: Split by locus
+locus_list <- split(allele_counts, allele_counts$locus)
+
+# Step 2: Build lines manually
+formatted_lines <- sapply(locus_list, function(df) {
+  k <- nrow(df)
+  counts <- paste(df$count, collapse = " ")
+  paste(df$locus[1], k, counts)
+})
+
+
+# Step 6: Format and export
+#writeLines(c("tetraploids_all", formatted_lines), "bottleneck_input_alltetras.txt")
+```
+
+##Make the pre and post DED files
+
+###Post-DED
+I want to see if the post-DED has evidence of a bottleneck then compare that to the pre-DED one.
+```{r}
+bottleneck_df=genind2df(tetra_postDED_genind)
+
+# Step 1: Reshape to long format
+long_geno <- bottleneck_df %>%
+  mutate(ind = seq_len(nrow(.))) %>%
+  pivot_longer(-ind, names_to = "locus", values_to = "genotype") %>%
+  filter(!is.na(genotype))
+
+# Step 2: Filter valid genotypes (only two-digit strings like "00", "01", "11")
+valid_geno <- long_geno %>%
+  filter(grepl("^[01]{2}$", genotype))
+
+# Step 3: Split genotypes into alleles
+allele1 <- substr(valid_geno$genotype, 1, 1)
+allele2 <- substr(valid_geno$genotype, 2, 2)
+
+# Step 4: Stack alleles into one column
+allele_matrix <- data.frame(
+  locus = rep(valid_geno$locus, 2),
+  allele = c(allele1, allele2)
+)
+
+# Step 5: Count alleles using base R
+allele_counts <- as.data.frame(table(allele_matrix$locus, allele_matrix$allele))
+colnames(allele_counts) <- c("locus", "allele", "count")
+lines <- apply(allele_counts, 1, function(row) paste(row, collapse = " "))
+
+# Step 1: Split by locus
+locus_list <- split(allele_counts, allele_counts$locus)
+
+# Step 2: Build lines manually
+formatted_lines <- sapply(locus_list, function(df) {
+  k <- nrow(df)
+  counts <- paste(df$count, collapse = " ")
+  paste(df$locus[1], k, counts)
+})
+
+
+for# Step 6: Format and export
+writeLines(c("tetraploids_postDED", formatted_lines), "bottleneck_input_postDEDtetras.txt")
+```
+###Pre-DED
+```{r}
+bottleneck_df=genind2df(tetra_preDED_genind)
+
+# Step 1: Reshape to long format
+long_geno <- bottleneck_df %>%
+  mutate(ind = seq_len(nrow(.))) %>%
+  pivot_longer(-ind, names_to = "locus", values_to = "genotype") %>%
+  filter(!is.na(genotype))
+
+# Step 2: Filter valid genotypes (only two-digit strings like "00", "01", "11")
+valid_geno <- long_geno %>%
+  filter(grepl("^[01]{2}$", genotype))
+
+# Step 3: Split genotypes into alleles
+allele1 <- substr(valid_geno$genotype, 1, 1)
+allele2 <- substr(valid_geno$genotype, 2, 2)
+
+# Step 4: Stack alleles into one column
+allele_matrix <- data.frame(
+  locus = rep(valid_geno$locus, 2),
+  allele = c(allele1, allele2)
+)
+
+# Step 5: Count alleles using base R
+allele_counts <- as.data.frame(table(allele_matrix$locus, allele_matrix$allele))
+colnames(allele_counts) <- c("locus", "allele", "count")
+lines <- apply(allele_counts, 1, function(row) paste(row, collapse = " "))
+
+# Step 1: Split by locus
+locus_list <- split(allele_counts, allele_counts$locus)
+
+# Step 2: Build lines manually
+formatted_lines <- sapply(locus_list, function(df) {
+  k <- nrow(df)
+  counts <- paste(df$count, collapse = " ")
+  paste(df$locus[1], k, counts)
+})
+
+
+# Step 6: Format and export
+writeLines(c("tetraploids_preDED", formatted_lines), "bottleneck_input_preDEDtetras.txt")
+```
+
+
+# Making Figures
+Yay! Now it's time to save all of this and start making the figures! To start, I want to do the wingen plots because that will be a good way to test the color palettes.
+```{r}
+###Nucleotide diversity
+ggplot_gd(tetra_wgd_pi, bkg = map.polygon, col = custom_colors_tetra) +
+  #ggtitle("Moving Window Pi") +
+  geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black", size = 0.85) +
+  theme_bw() +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal() +
+  labs(x="", y="")
+
+###Observed heterozygosity
+ggplot_gd(tetra_wgd_ho, bkg = map.polygon, col = custom_colors_tetra) +
+  #ggtitle("Moving Window Ho") +
+  geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black", size = 0.85) +
+  theme_bw() +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal() +
+  labs(x="", y="")
+
+###Allelic Richness
+ggplot_gd(tetra_wgd_ar, bkg = map.polygon, col = custom_colors_tetra) +
+  #ggtitle("Moving Window Ar") +
+  geom_point(data = tetra_with_coords, aes(x=long, y=lat), pch = 16, col = "black", size = 0.85) +
+  theme_bw() +
+  xlim(-110, -65) + 
+  ylim(25, 50) +
+  geom_path(data = map.polygon, aes(x = long, y = lat, group = group)) +
+  coord_equal() +
+  labs(x="", y="")
+```
+
+# PCA of Old samples
+During my committee meeting, they mentioned wanting to see if there was any evidence of population structure before humans started heavily moving them across the country. 
+
+I don't have a date for this but either Remek or Charlie mentioned 1940. Alan disagreed and said humans were moving elm beofre then, but I'm going to go with 1940 for this.
+```{r}
+###filter the trees we want
+ideal_pca_year=left_join(ideal_pca, year, by = "ind")
+oldtrees_pca=ideal_pca_year %>% 
+  filter(year<=1940)
+
+###graph it
+ggplot(oldtrees_pca, aes(PC1, PC2))+
+  geom_point(size = 2) + 
+  #coord_equal() + 
+  theme_classic() + 
+  #geom_text(aes(label = ind), color = "black", nudge_x = 0.5, nudge_y = 0.5, size = 3) +
+  xlab(paste0("PC1 (", signif(ideal_pve$pve[1], 3), "%)")) + ylab(paste0("PC2 (", signif(ideal_pve$pve[2], 3), "%)")) +
+  labs(title = "Trees from before 1940")
+
+```
