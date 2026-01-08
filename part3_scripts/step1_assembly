@@ -1,0 +1,15 @@
+#move to the folder with all of the allopolyploid samples + the subgenome references
+cd /data/labs/Fant/Quigg/hybpiper/01.trimmed/tetraploids3
+
+#generate the assembly script
+for i in *R1_paired.fastq.gz
+do f2=${i//_R1_/_R2_}
+f3=${i//_R1_paired.fastq.gz/}
+echo hybpiper assemble -t_dna /data/labs/Fant/Quigg/hybpiper/target_file3.fasta -r $i $f2 --prefix $f3 --bwa >> assemble.sh
+done
+
+#change permissions
+chmod +x assemble.sh
+
+#run it
+screen -L ./assemble.sh
