@@ -1,3 +1,11 @@
+#make the conda
+conda config --add channels defaults
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda config --set channel_priority strict
+conda create --name hybpiper -c chrisjackson-pellicle hybpiper
+conda activate hybpiper #verion 2.3.1
+
 #move to the folder with all of the allopolyploid samples + the subgenome references
 cd /data/labs/Fant/Quigg/hybpiper/01.trimmed/tetraploids3
 
