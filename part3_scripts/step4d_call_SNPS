@@ -210,5 +210,20 @@ vcftools --gzvcf final_DIP.vcf.gz --remove-indels --maf 0.05 --max-missing 0.50 
 vcftools --gzvcf final_DIP.vcf.gz --remove-indels --maf 0.1 --max-missing 0.80 --minQ 30 --min-meanDP 5 --max-meanDP 40 --minDP 5 --maxDP 40 --recode --recode-INFO-all --out final_ideal_DIP
 #this only kept 202 sites
 
+#filter out the multiallelic sites
+cd cd /data/labs/Fant/Quigg/04.SNP_calling/diploid_sub/05.vcfs
+
+bcftools view -m2 -M2 -v snps final_ideal_DIP.recode.vcf -Oz -o ideal_DIP.vcf
+bcftools stats ideal_DIP.vcf
+#466 samples and 190 SNPs
+
+bcftools view -m2 -M2 -v snps final_lazy_DIP.recode.vcf -Oz -o lazy_DIP.vcf
+bcftools stats lazy_DIP.vcf
+#466 samples and 510 SNPs
+
+bcftools view -m2 -M2 -v snps final_strict_DIP.recode.vcf -Oz -o strict_DIP.vcf
+bcftools stats strict_DIP.vcf
+#466 samples and 348 SNPs
+
 ###############################################################################################################################
 #download the vcf file and move to Rstudio
